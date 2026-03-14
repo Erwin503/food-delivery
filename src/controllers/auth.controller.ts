@@ -2,7 +2,11 @@ import { NextFunction, Request, Response } from 'express';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthTokenPayload } from '../interfaces/auth';
-import { AuthPasswordResetCodeModel, UserModel } from '../models';
+import {
+  AuthEmailVerificationCodeModel,
+  AuthPasswordResetCodeModel,
+  UserModel,
+} from '../models';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateLoginCode } from '../utils/auth';
 import { generateToken } from '../utils/generateToken';
@@ -12,6 +16,7 @@ import { toUserDto } from '../utils/userMapper';
 
 const LOGIN_CODE_TTL_SECONDS = 300;
 const PASSWORD_RESET_TTL_SECONDS = 900;
+const EMAIL_VERIFICATION_TTL_SECONDS = 900;
 
 const userColumns = [
   'id',
@@ -19,6 +24,7 @@ const userColumns = [
   'role',
   'company_id',
   'password_hash',
+  'email_verified_at',
   'full_name',
   'phone',
   'avatar_url',
@@ -31,6 +37,13 @@ const loadUserById = async (id: number): Promise<UserModel | undefined> =>
   db<UserModel>('users')
     .select(...userColumns)
     .where({ id })
+    .whereNull('deleted_at')
+    .first();
+
+const loadUserByEmail = async (email: string): Promise<UserModel | undefined> =>
+  db<UserModel>('users')
+    .select(...userColumns)
+    .where({ email })
     .whereNull('deleted_at')
     .first();
 
@@ -71,6 +84,112 @@ const sendEmailIfConfigured = async (to: string, subject: string, html: string):
     await sendEmail(to, subject, html);
   } catch (_error) {
     // Email delivery should not block auth flows in local development.
+  }
+};
+
+export const signup = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+
+    if (!email || password.length < 6) {
+      throw new AppError('Email and password with at least 6 characters are required', 400);
+    }
+
+    const existingUser = await loadUserByEmail(email);
+
+    if (existingUser) {
+      throw new AppError('User with this email already exists', 409);
+    }
+
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + EMAIL_VERIFICATION_TTL_SECONDS * 1000);
+    const verificationCode = generateLoginCode();
+
+    await db.transaction(async (trx) => {
+      await trx('users').insert({
+        email,
+        role: 'employee',
+        company_id: null,
+        password_hash: await hashPassword(password),
+        email_verified_at: null,
+        full_name: null,
+        phone: null,
+        avatar_url: null,
+        created_at: createdAt,
+        updated_at: createdAt,
+        deleted_at: null,
+      });
+
+      await trx('auth_email_verification_codes').insert({
+        email,
+        code: verificationCode,
+        expires_at: expiresAt,
+        consumed_at: null,
+        created_at: createdAt,
+      });
+    });
+
+    await sendEmailIfConfigured(
+      email,
+      'Verify your email',
+      `<p>Your verification code is <strong>${verificationCode}</strong>.</p>`
+    );
+
+    res.status(201).json({
+      ok: true,
+      expiresInSeconds: EMAIL_VERIFICATION_TTL_SECONDS,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const confirmSignup = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const code = String(req.body.code || '').trim();
+
+    if (!email || !code) {
+      throw new AppError('Email and code are required', 400);
+    }
+
+    const verificationCode = await db<AuthEmailVerificationCodeModel>('auth_email_verification_codes')
+      .where({ email, code })
+      .whereNull('consumed_at')
+      .orderBy('id', 'desc')
+      .first();
+
+    if (!verificationCode) {
+      throw new AppError('Invalid verification code', 401);
+    }
+
+    if (new Date(verificationCode.expires_at).getTime() < Date.now()) {
+      throw new AppError('Verification code expired', 401);
+    }
+
+    const verifiedAt = new Date();
+
+    await db.transaction(async (trx) => {
+      await trx('auth_email_verification_codes').where({ id: verificationCode.id }).update({
+        consumed_at: verifiedAt,
+      });
+
+      await trx('users').where({ email }).update({
+        email_verified_at: verifiedAt,
+        updated_at: verifiedAt,
+      });
+    });
+
+    const user = await loadUserByEmail(email);
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    issueAuthResponse(res, user);
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -132,15 +251,13 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
       throw new AppError('Code expired', 401);
     }
 
+    const verifiedAt = new Date();
+
     await db('auth_login_codes').where({ id: loginCode.id }).update({
-      consumed_at: new Date(),
+      consumed_at: verifiedAt,
     });
 
-    let user = await db<UserModel>('users')
-      .select(...userColumns)
-      .where({ email })
-      .whereNull('deleted_at')
-      .first();
+    let user = await loadUserByEmail(email);
 
     if (!user) {
       const inserted = await db('users').insert({
@@ -148,16 +265,23 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
         role: 'employee',
         company_id: null,
         password_hash: null,
+        email_verified_at: verifiedAt,
         full_name: null,
         phone: null,
         avatar_url: null,
-        created_at: new Date(),
-        updated_at: new Date(),
+        created_at: verifiedAt,
+        updated_at: verifiedAt,
         deleted_at: null,
       });
 
       const userId = Array.isArray(inserted) ? Number(inserted[0]) : Number(inserted);
       user = await loadUserById(userId);
+    } else if (!user.email_verified_at) {
+      await db('users').where({ id: user.id }).update({
+        email_verified_at: verifiedAt,
+        updated_at: verifiedAt,
+      });
+      user = await loadUserById(user.id);
     }
 
     if (!user) {
@@ -179,11 +303,7 @@ export const passwordLogin = async (req: Request, res: Response, next: NextFunct
       throw new AppError('Email and password are required', 400);
     }
 
-    const user = await db<UserModel>('users')
-      .select(...userColumns)
-      .where({ email })
-      .whereNull('deleted_at')
-      .first();
+    const user = await loadUserByEmail(email);
 
     if (!user || !(await comparePassword(password, user.password_hash))) {
       throw new AppError('Invalid email or password', 401);
@@ -285,7 +405,7 @@ export const requestPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('Email is required', 400);
     }
 
-    const user = await db<UserModel>('users').where({ email }).whereNull('deleted_at').first();
+    const user = await loadUserByEmail(email);
 
     if (user) {
       const code = generateLoginCode();
@@ -340,7 +460,7 @@ export const confirmPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('Reset code expired', 401);
     }
 
-    const user = await db<UserModel>('users').where({ email }).whereNull('deleted_at').first();
+    const user = await loadUserByEmail(email);
 
     if (!user) {
       throw new AppError('User not found', 404);

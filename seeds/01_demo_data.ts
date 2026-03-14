@@ -3,6 +3,7 @@ import { Knex } from 'knex';
 
 const now = '2026-03-15 09:00:00';
 const defaultPasswordHash = hashSync('Password123!', 10);
+const verifiedAt = '2026-03-15 09:01:00';
 
 export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 0');
@@ -11,6 +12,7 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('TRUNCATE TABLE orders');
   await knex.raw('TRUNCATE TABLE route_companies');
   await knex.raw('TRUNCATE TABLE company_managers');
+  await knex.raw('TRUNCATE TABLE auth_email_verification_codes');
   await knex.raw('TRUNCATE TABLE auth_password_reset_codes');
   await knex.raw('TRUNCATE TABLE auth_login_codes');
   await knex.raw('TRUNCATE TABLE dishes');
@@ -27,18 +29,22 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('users').insert([
-    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, full_name: 'System Administrator', phone: '+79990000001', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, full_name: 'Anna Smirnova', phone: '+79990000002', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, full_name: 'Mikhail Petrov', phone: '+79990000003', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, full_name: 'Ivan Ivanov', phone: '+79990000004', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, full_name: 'Maria Sidorova', phone: '+79990000005', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, full_name: 'Alexey Voronov', phone: '+79990000006', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, full_name: 'Elena Kotova', phone: '+79990000007', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'System Administrator', phone: '+79990000001', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Anna Smirnova', phone: '+79990000002', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Mikhail Petrov', phone: '+79990000003', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Ivan Ivanov', phone: '+79990000004', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Maria Sidorova', phone: '+79990000005', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Alexey Voronov', phone: '+79990000006', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Elena Kotova', phone: '+79990000007', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('auth_login_codes').insert([
     { id: 1, email: 'employee.ivanov@cook.local', code: '123456', expires_at: '2030-03-15 09:05:00', consumed_at: null, created_at: now },
     { id: 2, email: 'manager.romashka@cook.local', code: '654321', expires_at: '2030-03-15 09:05:00', consumed_at: '2026-03-15 09:02:00', created_at: now },
+  ]);
+
+  await knex('auth_email_verification_codes').insert([
+    { id: 1, email: 'new.signup@cook.local', code: '222333', expires_at: '2030-03-15 09:15:00', consumed_at: null, created_at: now },
   ]);
 
   await knex('auth_password_reset_codes').insert([

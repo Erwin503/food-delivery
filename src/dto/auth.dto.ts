@@ -43,3 +43,13 @@ export interface PasswordResetConfirmDto {
   code: string;
   newPassword: string;
 }
+
+export interface SignupDto {
+  email: string;
+  password: string;
+}
+
+export interface SignupConfirmDto {
+  email: string;
+  code: string;
+}
