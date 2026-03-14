@@ -1,12 +1,12 @@
 {
-  "name": "hakathon",
+  "name": "cook",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "node --require ts-node/register --test tests/index.test.ts",
+    "test": "node --require ts-node/register --test --test-concurrency=1 tests/index.test.ts",
     "migrate": "knex migrate:latest",
     "migrate:rollback": "knex migrate:rollback",
     "migrate:make": "knex migrate:make"

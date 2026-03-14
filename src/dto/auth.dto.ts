@@ -18,3 +18,28 @@ export interface LoginStep2ResponseDto {
   token: string;
   user: UserDto;
 }
+
+export interface PasswordLoginDto {
+  email: string;
+  password: string;
+}
+
+export interface PasswordLoginResponseDto {
+  token: string;
+  user: UserDto;
+}
+
+export interface SetPasswordDto {
+  currentPassword?: string;
+  newPassword: string;
+}
+
+export interface PasswordResetRequestDto {
+  email: string;
+}
+
+export interface PasswordResetConfirmDto {
+  email: string;
+  code: string;
+  newPassword: string;
+}

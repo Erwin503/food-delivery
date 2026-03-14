@@ -1,9 +1,11 @@
-import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import logger from "../utils/logger";
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import logger from '../utils/logger';
+import { AuthTokenPayload } from '../interfaces/auth';
+import { getJwtSecret } from '../utils/auth';
 
 export interface AuthRequest extends Request {
-  user?: any;
+  user?: AuthTokenPayload;
 }
 
 export const authenticateToken = (
@@ -11,26 +13,28 @@ export const authenticateToken = (
   res: Response,
   next: NextFunction
 ) => {
-  const authHeader = req.headers["authorization"];
+  const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    res.status(401).json({ message: "Отсутствует заголовок авторизации" });
+    res.status(401).json({ message: 'Authorization header is required' });
     return;
   }
 
-  const token = authHeader && authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
 
   if (!token) {
-    res.status(401).json({ message: "Токен не предоставлен" });
+    res.status(401).json({ message: 'Token is required' });
+    return;
   }
 
-  jwt.verify(token!, process.env.JWT_SECRET as string, (err, user) => {
+  jwt.verify(token, getJwtSecret(), (err, user) => {
     if (err) {
       logger.error(err);
-      return res.status(403).json({ message: "Недействительный токен" });
+      res.status(403).json({ message: 'Invalid token' });
+      return;
     }
-    logger.debug(JSON.stringify(user));
-    req.user = user;
+
+    req.user = user as AuthTokenPayload;
     next();
   });
 };

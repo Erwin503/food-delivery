@@ -7,6 +7,7 @@ export interface UserModel extends SoftDeleteColumns {
   email: string;
   role: UserRoleModel;
   company_id: number | null;
+  password_hash?: string | null;
   full_name: string | null;
   phone: string | null;
   avatar_url: string | null;
