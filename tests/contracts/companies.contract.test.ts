@@ -273,6 +273,29 @@ test('PUT /api/companies/:id/manager lets current manager transfer role to an em
   }
 });
 
+test('POST /api/companies/:id/subscription purchases or extends company subscription for one month', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies/1/subscription`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${managerToken()}` },
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.hasActiveSubscription, true);
+    assert.ok(payload.subscriptionStartedAt);
+    assert.ok(payload.subscriptionExpiresAt);
+
+    const company = await db('companies').where({ id: 1 }).first();
+    assert.ok(company.subscription_started_at);
+    assert.ok(company.subscription_expires_at);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('POST /api/companies/:id/join-code creates a short join code for the manager company', async () => {
   const { server, baseUrl } = await startTestServer();
 

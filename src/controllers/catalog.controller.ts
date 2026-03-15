@@ -1,7 +1,8 @@
 import { NextFunction, Request, Response } from 'express';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
-import { CategoryModel, DishModel } from '../models';
+import { AuthRequest } from '../middleware/authMiddleware';
+import { CategoryModel, CompanyModel, DishModel } from '../models';
 
 type CategoryRow = CategoryModel;
 type DishRow = DishModel;
@@ -12,7 +13,8 @@ const dishColumns = [
   'category_id',
   'name',
   'description',
-  'price_cents',
+  'base_price_cents',
+  'discount_price_cents',
   'is_active',
   'created_at',
   'updated_at',
@@ -22,6 +24,11 @@ const dishColumns = [
 const toIsoString = (value: string | Date | undefined): string =>
   new Date(value ?? new Date(0)).toISOString();
 
+type CompanySubscriptionRow = Pick<CompanyModel, 'id' | 'subscription_expires_at'>;
+
+const hasActiveSubscription = (company?: CompanySubscriptionRow | null): boolean =>
+  Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
+
 const toCategoryDto = (category: CategoryRow) => ({
   id: category.id,
   name: category.name,
@@ -30,16 +37,32 @@ const toCategoryDto = (category: CategoryRow) => ({
   updatedAt: toIsoString(category.updated_at),
 });
 
-const toDishDto = (dish: DishRow) => ({
+const toDishDto = (dish: DishRow, discounted: boolean) => ({
   id: dish.id,
   categoryId: dish.category_id,
   name: dish.name,
   description: dish.description,
-  priceCents: dish.price_cents,
+  basePriceCents: dish.base_price_cents,
+  discountPriceCents: dish.discount_price_cents,
+  priceCents: discounted ? dish.discount_price_cents : dish.base_price_cents,
   isActive: Boolean(dish.is_active),
   createdAt: toIsoString(dish.created_at),
   updatedAt: toIsoString(dish.updated_at),
 });
+
+const loadCompanyForUser = async (
+  companyId: number | null | undefined
+): Promise<CompanySubscriptionRow | undefined> => {
+  if (!companyId) {
+    return undefined;
+  }
+
+  return db<CompanyModel>('companies')
+    .select('id', 'subscription_expires_at')
+    .where({ id: companyId })
+    .whereNull('deleted_at')
+    .first();
+};
 
 const loadCategoryById = async (id: number): Promise<CategoryRow | undefined> =>
   db<CategoryRow>('categories')
@@ -216,11 +239,25 @@ export const deleteCategory = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-export const getDishes = async (req: Request, res: Response, next: NextFunction) => {
+export const getDishes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const company = await loadCompanyForUser(req.user?.companyId);
+    const discounted = hasActiveSubscription(company);
+
     const query = db<DishRow>('dishes as d')
       .join<CategoryRow>('categories as c', 'c.id', 'd.category_id')
-      .select('d.id', 'd.category_id', 'd.name', 'd.description', 'd.price_cents', 'd.is_active', 'd.created_at', 'd.updated_at', 'd.deleted_at')
+      .select(
+        'd.id',
+        'd.category_id',
+        'd.name',
+        'd.description',
+        'd.base_price_cents',
+        'd.discount_price_cents',
+        'd.is_active',
+        'd.created_at',
+        'd.updated_at',
+        'd.deleted_at'
+      )
       .whereNull('d.deleted_at')
       .whereNull('c.deleted_at')
       .orderBy('d.id', 'asc');
@@ -246,13 +283,13 @@ export const getDishes = async (req: Request, res: Response, next: NextFunction)
     }
 
     const dishes = await query;
-    res.json(dishes.map((dish) => toDishDto(dish as DishRow)));
+    res.json(dishes.map((dish) => toDishDto(dish as DishRow, discounted)));
   } catch (error) {
     next(error);
   }
 };
 
-export const getDishById = async (req: Request, res: Response, next: NextFunction) => {
+export const getDishById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const dishId = Number(req.params.id);
 
@@ -260,14 +297,15 @@ export const getDishById = async (req: Request, res: Response, next: NextFunctio
       throw new AppError('Dish id is required', 400);
     }
 
+    const company = await loadCompanyForUser(req.user?.companyId);
     const dish = await requireDish(dishId);
-    res.json(toDishDto(dish));
+    res.json(toDishDto(dish, hasActiveSubscription(company)));
   } catch (error) {
     next(error);
   }
 };
 
-export const getDishesByCategory = async (req: Request, res: Response, next: NextFunction) => {
+export const getDishesByCategory = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const categoryId = Number(req.params.id);
 
@@ -277,13 +315,14 @@ export const getDishesByCategory = async (req: Request, res: Response, next: Nex
 
     await requireCategory(categoryId);
 
+    const company = await loadCompanyForUser(req.user?.companyId);
     const dishes = await db<DishRow>('dishes')
       .select(...dishColumns)
       .where({ category_id: categoryId })
       .whereNull('deleted_at')
       .orderBy('id', 'asc');
 
-    res.json(dishes.map(toDishDto));
+    res.json(dishes.map((dish) => toDishDto(dish, hasActiveSubscription(company))));
   } catch (error) {
     next(error);
   }
@@ -294,11 +333,21 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
     const categoryId = Number(req.body.categoryId);
     const name = String(req.body.name || '').trim();
     const description = req.body.description === undefined ? null : req.body.description;
-    const priceCents = Number(req.body.priceCents);
+    const basePriceCents = Number(req.body.basePriceCents);
+    const discountPriceCents = Number(req.body.discountPriceCents);
     const isActive = req.body.isActive === undefined ? true : Boolean(req.body.isActive);
 
-    if (!categoryId || !name || !Number.isFinite(priceCents)) {
-      throw new AppError('categoryId, name, and priceCents are required', 400);
+    if (
+      !categoryId ||
+      !name ||
+      !Number.isFinite(basePriceCents) ||
+      !Number.isFinite(discountPriceCents)
+    ) {
+      throw new AppError('categoryId, name, basePriceCents, and discountPriceCents are required', 400);
+    }
+
+    if (discountPriceCents > basePriceCents) {
+      throw new AppError('discountPriceCents cannot exceed basePriceCents', 400);
     }
 
     await requireCategory(categoryId);
@@ -308,7 +357,8 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
       category_id: categoryId,
       name,
       description,
-      price_cents: priceCents,
+      base_price_cents: basePriceCents,
+      discount_price_cents: discountPriceCents,
       is_active: isActive,
       created_at: now,
       updated_at: now,
@@ -318,7 +368,7 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
     const dishId = Array.isArray(inserted) ? Number(inserted[0]) : Number(inserted);
     const dish = await requireDish(dishId);
 
-    res.status(201).json(toDishDto(dish));
+    res.status(201).json(toDishDto(dish, false));
   } catch (error) {
     next(error);
   }
@@ -332,8 +382,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       throw new AppError('Dish id is required', 400);
     }
 
-    await requireDish(dishId);
-
+    const currentDish = await requireDish(dishId);
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
@@ -363,24 +412,47 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.description = req.body.description ?? null;
     }
 
-    if ('priceCents' in req.body) {
-      const priceCents = Number(req.body.priceCents);
+    if ('basePriceCents' in req.body) {
+      const basePriceCents = Number(req.body.basePriceCents);
 
-      if (!Number.isFinite(priceCents)) {
-        throw new AppError('priceCents must be a number', 400);
+      if (!Number.isFinite(basePriceCents)) {
+        throw new AppError('basePriceCents must be a number', 400);
       }
 
-      patch.price_cents = priceCents;
+      patch.base_price_cents = basePriceCents;
+    }
+
+    if ('discountPriceCents' in req.body) {
+      const discountPriceCents = Number(req.body.discountPriceCents);
+
+      if (!Number.isFinite(discountPriceCents)) {
+        throw new AppError('discountPriceCents must be a number', 400);
+      }
+
+      patch.discount_price_cents = discountPriceCents;
     }
 
     if ('isActive' in req.body) {
       patch.is_active = Boolean(req.body.isActive);
     }
 
+    const nextBasePriceCents =
+      patch.base_price_cents !== undefined
+        ? Number(patch.base_price_cents)
+        : currentDish.base_price_cents;
+    const nextDiscountPriceCents =
+      patch.discount_price_cents !== undefined
+        ? Number(patch.discount_price_cents)
+        : currentDish.discount_price_cents;
+
+    if (nextDiscountPriceCents > nextBasePriceCents) {
+      throw new AppError('discountPriceCents cannot exceed basePriceCents', 400);
+    }
+
     await db('dishes').where({ id: dishId }).update(patch);
 
     const dish = await requireDish(dishId);
-    res.json(toDishDto(dish));
+    res.json(toDishDto(dish, false));
   } catch (error) {
     next(error);
   }

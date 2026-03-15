@@ -5,4 +5,6 @@ export interface CompanyModel extends SoftDeleteColumns {
   name: string;
   description: string | null;
   address: string | null;
+  subscription_started_at?: Date | string | null;
+  subscription_expires_at?: Date | string | null;
 }

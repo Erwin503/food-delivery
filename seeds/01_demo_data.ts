@@ -24,9 +24,9 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 1');
 
   await knex('companies').insert([
-    { id: 1, name: 'Romashka LLC', description: 'Office customer with regular lunch orders.', address: 'Moscow, Pushkina 10, office 12', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Vector JSC', description: 'Technology company with morning deliveries.', address: 'Moscow, Leningradsky 25', created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'Sever IE', description: 'Small team ordering lunches on weekdays.', address: 'Moscow, Novoslobodskaya 18', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'Romashka LLC', description: 'Office customer with regular lunch orders.', address: 'Moscow, Pushkina 10, office 12', subscription_started_at: '2026-03-10 09:00:00', subscription_expires_at: '2026-04-10 09:00:00', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'Vector JSC', description: 'Technology company with morning deliveries.', address: 'Moscow, Leningradsky 25', subscription_started_at: null, subscription_expires_at: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'Sever IE', description: 'Small team ordering lunches on weekdays.', address: 'Moscow, Novoslobodskaya 18', subscription_started_at: '2026-02-01 09:00:00', subscription_expires_at: '2026-03-01 09:00:00', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('users').insert([
@@ -64,11 +64,11 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('dishes').insert([
-    { id: 1, category_id: 1, name: 'Margherita', description: 'Tomato sauce, mozzarella, basil.', price_cents: 59900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, category_id: 1, name: 'Pepperoni', description: 'Pepperoni, cheese, signature sauce.', price_cents: 74900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, category_id: 2, name: 'Caesar with chicken', description: 'Chicken, romaine, parmesan, croutons.', price_cents: 48900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 4, category_id: 3, name: 'Cranberry mors', description: 'House drink 0.5L.', price_cents: 14900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 5, category_id: 3, name: 'Tarragon lemonade', description: 'Sparkling drink 0.33L.', price_cents: 12900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, category_id: 1, name: 'Margherita', description: 'Tomato sauce, mozzarella, basil.', base_price_cents: 59900, discount_price_cents: 53900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, category_id: 1, name: 'Pepperoni', description: 'Pepperoni, cheese, signature sauce.', base_price_cents: 74900, discount_price_cents: 67400, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, category_id: 2, name: 'Caesar with chicken', description: 'Chicken, romaine, parmesan, croutons.', base_price_cents: 48900, discount_price_cents: 43900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 4, category_id: 3, name: 'Cranberry mors', description: 'House drink 0.5L.', base_price_cents: 14900, discount_price_cents: 12900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 5, category_id: 3, name: 'Tarragon lemonade', description: 'Sparkling drink 0.33L.', base_price_cents: 12900, discount_price_cents: 10900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('routes').insert([

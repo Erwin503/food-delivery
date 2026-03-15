@@ -69,6 +69,12 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           example: Tomato sauce, mozzarella, basil.
+ *         basePriceCents:
+ *           type: integer
+ *           example: 59900
+ *         discountPriceCents:
+ *           type: integer
+ *           example: 53900
  *         priceCents:
  *           type: integer
  *           example: 59900
@@ -117,9 +123,12 @@ const router = Router();
  *         description:
  *           type: string
  *           nullable: true
- *         priceCents:
+ *         basePriceCents:
  *           type: integer
  *           example: 79900
+ *         discountPriceCents:
+ *           type: integer
+ *           example: 69900
  *         isActive:
  *           type: boolean
  *           example: true
@@ -133,7 +142,9 @@ const router = Router();
  *         description:
  *           type: string
  *           nullable: true
- *         priceCents:
+ *         basePriceCents:
+ *           type: integer
+ *         discountPriceCents:
  *           type: integer
  *         isActive:
  *           type: boolean

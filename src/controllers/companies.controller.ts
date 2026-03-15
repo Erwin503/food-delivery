@@ -8,7 +8,17 @@ import { toUserDto } from '../utils/userMapper';
 
 const COMPANY_JOIN_CODE_TTL_SECONDS = 900;
 
-const companyColumns = ['id', 'name', 'description', 'address', 'created_at', 'updated_at', 'deleted_at'] as const;
+const companyColumns = [
+  'id',
+  'name',
+  'description',
+  'address',
+  'subscription_started_at',
+  'subscription_expires_at',
+  'created_at',
+  'updated_at',
+  'deleted_at',
+] as const;
 const userColumns = [
   'id',
   'email',
@@ -32,6 +42,11 @@ const toCompanyDto = (company: CompanyModel) => ({
   name: company.name,
   description: company.description,
   address: company.address,
+  subscriptionStartedAt: company.subscription_started_at ? toIsoString(company.subscription_started_at) : null,
+  subscriptionExpiresAt: company.subscription_expires_at ? toIsoString(company.subscription_expires_at) : null,
+  hasActiveSubscription:
+    Boolean(company.subscription_expires_at) &&
+    new Date(company.subscription_expires_at as string | Date).getTime() > Date.now(),
   createdAt: toIsoString(company.created_at),
   updatedAt: toIsoString(company.updated_at),
 });
@@ -135,6 +150,11 @@ const loadCompanyManager = async (companyId: number): Promise<UserModel | undefi
     .first();
 
 const normalizeEmail = (email: unknown): string => String(email || '').trim().toLowerCase();
+const addOneMonth = (date: Date): Date => {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + 1);
+  return next;
+};
 
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
@@ -197,6 +217,8 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
       name,
       description,
       address,
+      subscription_started_at: null,
+      subscription_expires_at: null,
       created_at: now,
       updated_at: now,
       deleted_at: null,
@@ -516,6 +538,36 @@ export const createCompanyJoinCode = async (req: AuthRequest, res: Response, nex
       code,
       expiresInSeconds: COMPANY_JOIN_CODE_TTL_SECONDS,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const purchaseCompanySubscription = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const companyId = Number(req.params.id);
+
+    if (!companyId) {
+      throw new AppError('Company id is required', 400);
+    }
+
+    const company = await requireManagerOrAdminForCompany(req, companyId);
+    const now = new Date();
+    const currentExpiry =
+      company.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > now.getTime()
+        ? new Date(company.subscription_expires_at)
+        : null;
+    const subscriptionStartedAt = currentExpiry ? new Date(currentExpiry) : now;
+    const subscriptionExpiresAt = addOneMonth(subscriptionStartedAt);
+
+    await db('companies').where({ id: companyId }).update({
+      subscription_started_at: subscriptionStartedAt,
+      subscription_expires_at: subscriptionExpiresAt,
+      updated_at: now,
+    });
+
+    const updatedCompany = await requireCompany(companyId);
+    res.json(toCompanyDto(updatedCompany));
   } catch (error) {
     next(error);
   }

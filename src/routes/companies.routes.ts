@@ -9,6 +9,7 @@ import {
   getCompanyManager,
   getCompanyUsers,
   joinCompanyByCode,
+  purchaseCompanySubscription,
   removeCompanyUser,
   setCompanyManager,
   updateCompany,
@@ -39,6 +40,16 @@ const router = Router();
  *         address:
  *           type: string
  *           nullable: true
+ *         subscriptionStartedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         subscriptionExpiresAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         hasActiveSubscription:
+ *           type: boolean
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -101,6 +112,9 @@ const router = Router();
  *       properties:
  *         code:
  *           type: string
+ *     CompanySubscriptionResponse:
+ *       allOf:
+ *         - $ref: '#/components/schemas/Company'
  */
 
 /**
@@ -358,6 +372,30 @@ router.delete('/companies/:id/users/:userId', authenticateToken, removeCompanyUs
  */
 router.get('/companies/:id/manager', authenticateToken, getCompanyManager);
 router.put('/companies/:id/manager', authenticateToken, setCompanyManager);
+
+/**
+ * @swagger
+ * /companies/{id}/subscription:
+ *   post:
+ *     summary: Purchase or extend company subscription for one month
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Subscription updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CompanySubscriptionResponse'
+ */
+router.post('/companies/:id/subscription', authenticateToken, purchaseCompanySubscription);
 
 /**
  * @swagger

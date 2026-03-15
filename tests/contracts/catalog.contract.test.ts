@@ -132,6 +132,9 @@ test('GET /api/dishes returns dishes with category and active filters', async ()
     assert.equal(payload.length, 1);
     assert.equal(payload[0].name, 'Cranberry mors');
     assert.equal(payload[0].isActive, true);
+    assert.equal(payload[0].basePriceCents, 14900);
+    assert.equal(payload[0].discountPriceCents, 12900);
+    assert.equal(payload[0].priceCents, 12900);
   } finally {
     await stopTestServer(server);
   }
@@ -188,7 +191,8 @@ test('POST /api/dishes creates a dish for manager or admin', async () => {
         categoryId: 2,
         name: 'Greek salad',
         description: 'Cucumber, tomato, feta.',
-        priceCents: 52900,
+        basePriceCents: 52900,
+        discountPriceCents: 47900,
         isActive: true,
       }),
     });
@@ -217,7 +221,8 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
       },
       body: JSON.stringify({
         name: 'Tarragon lemonade zero',
-        priceCents: 13900,
+        basePriceCents: 13900,
+        discountPriceCents: 11900,
         isActive: true,
       }),
     });
@@ -226,6 +231,8 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
     const payload = await response.json();
     assert.equal(payload.name, 'Tarragon lemonade zero');
     assert.equal(payload.priceCents, 13900);
+    assert.equal(payload.basePriceCents, 13900);
+    assert.equal(payload.discountPriceCents, 11900);
     assert.equal(payload.isActive, true);
   } finally {
     await stopTestServer(server);

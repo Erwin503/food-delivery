@@ -3,6 +3,9 @@ export interface CompanyDto {
   name: string;
   description: string | null;
   address: string | null;
+  subscriptionStartedAt: string | null;
+  subscriptionExpiresAt: string | null;
+  hasActiveSubscription: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,4 +39,10 @@ export interface CompanyJoinCodeDto {
 
 export interface JoinCompanyByCodeDto {
   code: string;
+}
+
+export interface CompanySubscriptionDto {
+  subscriptionStartedAt: string;
+  subscriptionExpiresAt: string;
+  hasActiveSubscription: boolean;
 }
