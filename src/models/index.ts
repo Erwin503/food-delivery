@@ -4,6 +4,7 @@ export * from './auth-password-reset-code.model';
 export * from './category.model';
 export * from './common.model';
 export * from './company-manager.model';
+export * from './company-join-code.model';
 export * from './company.model';
 export * from './dish.model';
 export * from './order-item.model';

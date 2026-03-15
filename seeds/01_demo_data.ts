@@ -12,6 +12,7 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('TRUNCATE TABLE orders');
   await knex.raw('TRUNCATE TABLE route_companies');
   await knex.raw('TRUNCATE TABLE company_managers');
+  await knex.raw('TRUNCATE TABLE company_join_codes');
   await knex.raw('TRUNCATE TABLE auth_email_verification_codes');
   await knex.raw('TRUNCATE TABLE auth_password_reset_codes');
   await knex.raw('TRUNCATE TABLE auth_login_codes');

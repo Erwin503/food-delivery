@@ -20,10 +20,20 @@ export interface UpdateCompanyDto {
 }
 
 export interface AssignCompanyUserDto {
-  userId: number;
+  userId?: number;
+  email?: string;
 }
 
 export interface CompanyManagerDto {
   companyId: number;
   userId: number;
+}
+
+export interface CompanyJoinCodeDto {
+  code: string;
+  expiresInSeconds: number;
+}
+
+export interface JoinCompanyByCodeDto {
+  code: string;
 }
