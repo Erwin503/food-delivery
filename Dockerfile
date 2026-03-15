@@ -1,27 +1,32 @@
-# 1. Базовый образ с Node.js
-FROM node:18-alpine
+FROM node:20-alpine AS builder
 
-# 2. Создаём рабочую директорию
 WORKDIR /app
 
-# 3. Копируем package.json и package-lock.json (или yarn.lock)
 COPY package*.json ./
+RUN npm ci
 
-# 4. Устанавливаем зависимости
-RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY knexfile.js ./
+COPY src ./src
+COPY migrations ./migrations
+COPY seeds ./seeds
 
-# 5. Копируем весь исходный код
-COPY . .
-
-# 6. Компилируем TypeScript
 RUN npm run build
 
-# 7. Готовим директорию для миграций и сидов
-ENV KNEX_MIGRATE_DIR=/app/migrations
-ENV KNEX_SEED_DIR=/app/seeds
+FROM node:20-alpine AS runner
 
-# 8. Экспонируем порт приложения
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/knexfile.js ./knexfile.js
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/seeds ./seeds
+
 EXPOSE 3000
 
-# 9. Запускаем прод-сервер
 CMD ["node", "dist/index.js"]
