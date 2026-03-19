@@ -50,7 +50,6 @@
     "nodemailer": "^6.10.1",
     "nodemon": "^3.1.7",
     "qrcode": "^1.5.4",
-    "sqlite3": "^5.1.7",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "undici-types": "^6.19.8",
