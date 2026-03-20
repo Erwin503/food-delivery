@@ -12,13 +12,12 @@ COPY migrations ./migrations
 COPY seeds ./seeds
 
 RUN npm run build
-RUN npm prune --omit=dev
 
 FROM node:20-bookworm-slim AS runner
 
 WORKDIR /app
 
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 
 COPY package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
