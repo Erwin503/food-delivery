@@ -1,18 +1,19 @@
 import { Knex } from 'knex';
-import { createAuthLoginCodesTable, dropAuthLoginCodesTable } from './schema/auth_login_codes.ts';
-import { createCategoriesTable, dropCategoriesTable } from './schema/categories.ts';
-import { createCompaniesTable, dropCompaniesTable } from './schema/companies.ts';
-import { createCompanyManagersTable, dropCompanyManagersTable } from './schema/company_managers.ts';
-import { createDishesTable, dropDishesTable } from './schema/dishes.ts';
-import { createOrderItemsTable, dropOrderItemsTable } from './schema/order_items.ts';
-import {
+
+const { createAuthLoginCodesTable, dropAuthLoginCodesTable } = require('./schema/auth_login_codes');
+const { createCategoriesTable, dropCategoriesTable } = require('./schema/categories');
+const { createCompaniesTable, dropCompaniesTable } = require('./schema/companies');
+const { createCompanyManagersTable, dropCompanyManagersTable } = require('./schema/company_managers');
+const { createDishesTable, dropDishesTable } = require('./schema/dishes');
+const { createOrderItemsTable, dropOrderItemsTable } = require('./schema/order_items');
+const {
   createOrderStatusHistoryTable,
   dropOrderStatusHistoryTable,
-} from './schema/order_status_history.ts';
-import { createOrdersTable, dropOrdersTable } from './schema/orders.ts';
-import { createRouteCompaniesTable, dropRouteCompaniesTable } from './schema/route_companies.ts';
-import { createRoutesTable, dropRoutesTable } from './schema/routes.ts';
-import { createUsersTable, dropUsersTable } from './schema/users.ts';
+} = require('./schema/order_status_history');
+const { createOrdersTable, dropOrdersTable } = require('./schema/orders');
+const { createRouteCompaniesTable, dropRouteCompaniesTable } = require('./schema/route_companies');
+const { createRoutesTable, dropRoutesTable } = require('./schema/routes');
+const { createUsersTable, dropUsersTable } = require('./schema/users');
 
 export async function up(knex: Knex): Promise<void> {
   await createCompaniesTable(knex);
