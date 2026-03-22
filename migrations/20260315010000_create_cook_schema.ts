@@ -1,4 +1,7 @@
+import { createRequire } from 'module';
 import { Knex } from 'knex';
+
+const require = createRequire(import.meta.url);
 
 const { createAuthLoginCodesTable, dropAuthLoginCodesTable } = require('./schema/auth_login_codes');
 const { createCategoriesTable, dropCategoriesTable } = require('./schema/categories');
