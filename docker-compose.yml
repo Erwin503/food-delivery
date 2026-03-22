@@ -44,7 +44,7 @@ services:
     command: >
       sh -c "npx knex migrate:latest &&
              npx knex seed:run &&
-             node dist/index.js"
+             node dist/src/index.js"
 
 volumes:
   db_data:
