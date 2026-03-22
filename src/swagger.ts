@@ -1,3 +1,4 @@
+import path from 'path';
 import swaggerJSDoc from 'swagger-jsdoc';
 import { version, description } from '../package.json';
 
@@ -22,5 +23,8 @@ const swaggerDefinition = {
 
 export const swaggerSpec = swaggerJSDoc({
   swaggerDefinition,
-  apis: ['./src/routes/**/*.ts'],
+  apis: [
+    path.join(__dirname, 'routes/**/*.js'),
+    path.join(process.cwd(), 'src/routes/**/*.ts'),
+  ],
 });
