@@ -1,22 +1,18 @@
-import { createRequire } from 'module';
 import { Knex } from 'knex';
-
-const require = createRequire(import.meta.url);
-
-const { createAuthLoginCodesTable, dropAuthLoginCodesTable } = require('./schema/auth_login_codes');
-const { createCategoriesTable, dropCategoriesTable } = require('./schema/categories');
-const { createCompaniesTable, dropCompaniesTable } = require('./schema/companies');
-const { createCompanyManagersTable, dropCompanyManagersTable } = require('./schema/company_managers');
-const { createDishesTable, dropDishesTable } = require('./schema/dishes');
-const { createOrderItemsTable, dropOrderItemsTable } = require('./schema/order_items');
-const {
+import { createAuthLoginCodesTable, dropAuthLoginCodesTable } from './schema/auth_login_codes';
+import { createCategoriesTable, dropCategoriesTable } from './schema/categories';
+import { createCompaniesTable, dropCompaniesTable } from './schema/companies';
+import { createCompanyManagersTable, dropCompanyManagersTable } from './schema/company_managers';
+import { createDishesTable, dropDishesTable } from './schema/dishes';
+import { createOrderItemsTable, dropOrderItemsTable } from './schema/order_items';
+import {
   createOrderStatusHistoryTable,
   dropOrderStatusHistoryTable,
-} = require('./schema/order_status_history');
-const { createOrdersTable, dropOrdersTable } = require('./schema/orders');
-const { createRouteCompaniesTable, dropRouteCompaniesTable } = require('./schema/route_companies');
-const { createRoutesTable, dropRoutesTable } = require('./schema/routes');
-const { createUsersTable, dropUsersTable } = require('./schema/users');
+} from './schema/order_status_history';
+import { createOrdersTable, dropOrdersTable } from './schema/orders';
+import { createRouteCompaniesTable, dropRouteCompaniesTable } from './schema/route_companies';
+import { createRoutesTable, dropRoutesTable } from './schema/routes';
+import { createUsersTable, dropUsersTable } from './schema/users';
 
 export async function up(knex: Knex): Promise<void> {
   await createCompaniesTable(knex);
