@@ -2,23 +2,27 @@ import { NextFunction, Response } from 'express';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { CompanyModel, DishModel, OrderItemModel, OrderModel, OrderStatusHistoryModel, UserModel } from '../models';
+import {
+  CompanyModel,
+  DishModel,
+  OrderItemModel,
+  OrderModel,
+  OrderStatusHistoryModel,
+  RouteModel,
+  UserModel,
+} from '../models';
 
 const orderColumns = [
   'id',
   'order_number',
   'user_id',
   'company_id',
+  'route_id',
   'status',
-  'delivery_address',
-  'contact_name',
-  'contact_phone',
-  'scheduled_for',
   'subtotal_cents',
   'delivery_fee_cents',
   'discount_cents',
   'total_cents',
-  'comment',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -53,6 +57,17 @@ const dishColumns = [
   'deleted_at',
 ] as const;
 
+const routeColumns = [
+  'id',
+  'name',
+  'departure_at',
+  'order_acceptance_ends_at',
+  'description',
+  'created_at',
+  'updated_at',
+  'deleted_at',
+] as const;
+
 const toIsoString = (value: string | Date | undefined | null): string | null =>
   value ? new Date(value).toISOString() : null;
 
@@ -64,16 +79,12 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   orderNumber: order.order_number,
   userId: order.user_id,
   companyId: order.company_id,
+  routeId: order.route_id,
   status: order.status,
-  deliveryAddress: order.delivery_address,
-  contactName: order.contact_name,
-  contactPhone: order.contact_phone,
-  scheduledFor: toIsoString(order.scheduled_for),
   subtotalCents: order.subtotal_cents,
   deliveryFeeCents: order.delivery_fee_cents,
   discountCents: order.discount_cents,
   totalCents: order.total_cents,
-  comment: order.comment,
   createdAt: toIsoString(order.created_at),
   updatedAt: toIsoString(order.updated_at),
   items: items?.map((item) => ({
@@ -146,6 +157,28 @@ const loadCompany = async (id: number): Promise<Pick<CompanyModel, 'id' | 'addre
     .whereNull('deleted_at')
     .first();
 
+const loadRouteById = async (
+  id: number
+): Promise<Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'> | undefined> =>
+  db<RouteModel>('routes')
+    .select('id', 'departure_at', 'order_acceptance_ends_at')
+    .where({ id })
+    .whereNull('deleted_at')
+    .first();
+
+const getAvailableRouteForCompany = async (
+  companyId: number
+): Promise<Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'> | undefined> =>
+  db<RouteModel>('routes as r')
+    .join('route_companies as rc', 'rc.route_id', 'r.id')
+    .select('r.id', 'r.departure_at', 'r.order_acceptance_ends_at')
+    .where('rc.company_id', companyId)
+    .whereNull('r.deleted_at')
+    .andWhere('r.order_acceptance_ends_at', '>', new Date())
+    .andWhere('r.departure_at', '>', new Date())
+    .orderBy('r.departure_at', 'asc')
+    .first();
+
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
 
@@ -188,9 +221,19 @@ const requireManagerOrAdminForOrder = async (req: AuthRequest, order: OrderModel
   throw new AppError('Forbidden', 403);
 };
 
-const ensureOrderIsEditable = (order: OrderModel) => {
+const ensureOrderIsEditable = async (order: OrderModel) => {
   if (order.status !== 'created') {
     throw new AppError('Only created orders can be edited', 409);
+  }
+
+  const route = await loadRouteById(order.route_id);
+
+  if (!route) {
+    throw new AppError('Route not found', 404);
+  }
+
+  if (new Date(route.order_acceptance_ends_at).getTime() <= Date.now()) {
+    throw new AppError('Order acceptance time has ended for this route', 409);
   }
 };
 
@@ -271,6 +314,10 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
     query.andWhere('user_id', Number(req.query.userId));
   }
 
+  if (req.query.routeId) {
+    query.andWhere('route_id', Number(req.query.routeId));
+  }
+
     const orders = await query;
     res.json(orders.map((order) => toOrderDto(order)));
   } catch (error) {
@@ -300,8 +347,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const currentUser = await loadCurrentUser(req);
 
-    if (currentUser.role !== 'employee') {
-      throw new AppError('Only employees can create orders', 403);
+    if (!['employee', 'manager'].includes(currentUser.role)) {
+      throw new AppError('Only employees or managers can create orders', 403);
     }
 
     if (!currentUser.company_id) {
@@ -312,6 +359,12 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
     if (!company) {
       throw new AppError('Company not found', 404);
+    }
+
+    const route = await getAvailableRouteForCompany(currentUser.company_id);
+
+    if (!route) {
+      throw new AppError('No active route is available for this company', 409);
     }
 
     const now = new Date();
@@ -325,16 +378,12 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         order_number: orderNumber,
         user_id: currentUser.id,
         company_id: currentUser.company_id,
+        route_id: route.id,
         status: 'created',
-        delivery_address: req.body.deliveryAddress ?? company.address ?? null,
-        contact_name: req.body.contactName ?? currentUser.full_name ?? null,
-        contact_phone: req.body.contactPhone ?? currentUser.phone ?? null,
-        scheduled_for: req.body.scheduledFor ?? null,
         subtotal_cents: 0,
         delivery_fee_cents: deliveryFeeCents,
         discount_cents: discountCents,
         total_cents: totalCents,
-        comment: req.body.comment ?? null,
         created_at: now,
         updated_at: now,
         deleted_at: null,
@@ -376,30 +425,17 @@ export const updateOrder = async (req: AuthRequest, res: Response, next: NextFun
       throw new AppError('Completed or cancelled orders cannot be updated', 409);
     }
 
+    await ensureOrderIsEditable(order);
+
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
 
-    if ('deliveryAddress' in req.body) {
-      patch.delivery_address = req.body.deliveryAddress ?? null;
-    }
-    if ('contactName' in req.body) {
-      patch.contact_name = req.body.contactName ?? null;
-    }
-    if ('contactPhone' in req.body) {
-      patch.contact_phone = req.body.contactPhone ?? null;
-    }
-    if ('scheduledFor' in req.body) {
-      patch.scheduled_for = req.body.scheduledFor ?? null;
-    }
     if ('deliveryFeeCents' in req.body) {
       patch.delivery_fee_cents = Number(req.body.deliveryFeeCents);
     }
     if ('discountCents' in req.body) {
       patch.discount_cents = Number(req.body.discountCents);
-    }
-    if ('comment' in req.body) {
-      patch.comment = req.body.comment ?? null;
     }
 
     await db.transaction(async (trx) => {
@@ -424,11 +460,13 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     const order = await requireOrder(orderId);
-    const currentUser = await requireManagerOrAdminForOrder(req, order);
+    const currentUser = await requireOrderEditor(req, order);
 
     if (['completed', 'cancelled'].includes(order.status)) {
       throw new AppError('Order cannot be cancelled', 409);
     }
+
+    await ensureOrderIsEditable(order);
 
     const now = new Date();
     await db.transaction(async (trx) => {
@@ -465,7 +503,7 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
-    ensureOrderIsEditable(order);
+    await ensureOrderIsEditable(order);
 
     const dish = await requireDish(dishId);
     const priceCents = await getOrderDishPrice(order, dish);
@@ -518,7 +556,7 @@ export const updateOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
-    ensureOrderIsEditable(order);
+    await ensureOrderIsEditable(order);
 
     await db.transaction(async (trx) => {
       const item = await trx<OrderItemModel>('order_items')
@@ -557,7 +595,7 @@ export const removeOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
-    ensureOrderIsEditable(order);
+    await ensureOrderIsEditable(order);
 
     await db.transaction(async (trx) => {
       const deleted = await trx('order_items').where({ order_id: orderId, dish_id: dishId }).delete();

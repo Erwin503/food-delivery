@@ -5,6 +5,8 @@ const now = '2026-03-15 09:00:00';
 const defaultPasswordHash = hashSync('Password123!', 10);
 const verifiedAt = '2026-03-15 09:01:00';
 
+const toSqlDateTime = (date: Date) => date.toISOString().slice(0, 19).replace('T', ' ');
+
 export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 0');
   await knex.raw('TRUNCATE TABLE order_status_history');
@@ -71,21 +73,35 @@ export async function seed(knex: Knex): Promise<void> {
     { id: 5, category_id: 3, name: 'Tarragon lemonade', description: 'Sparkling drink 0.33L.', base_price_cents: 12900, discount_price_cents: 10900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
+  const runtimeNow = new Date();
+  const morningRouteDeparture = new Date(runtimeNow.getTime() + 24 * 60 * 60 * 1000);
+  morningRouteDeparture.setHours(8, 0, 0, 0);
+  const morningRouteCutoff = new Date(morningRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
+
+  const dayRouteDeparture = new Date(runtimeNow.getTime() + 24 * 60 * 60 * 1000);
+  dayRouteDeparture.setHours(12, 0, 0, 0);
+  const dayRouteCutoff = new Date(dayRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
+
+  const archiveRouteDeparture = new Date(runtimeNow.getTime() - 24 * 60 * 60 * 1000);
+  archiveRouteDeparture.setHours(12, 0, 0, 0);
+  const archiveRouteCutoff = new Date(archiveRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
+
   await knex('routes').insert([
-    { id: 1, name: 'Morning route', departure_at: '2026-03-16 07:30:00', description: 'North direction delivery route.', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Day route', departure_at: '2026-03-16 12:00:00', description: 'Main corporate delivery route.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'Morning route', departure_at: toSqlDateTime(morningRouteDeparture), order_acceptance_ends_at: toSqlDateTime(morningRouteCutoff), description: 'North direction delivery route.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'Day route', departure_at: toSqlDateTime(dayRouteDeparture), order_acceptance_ends_at: toSqlDateTime(dayRouteCutoff), description: 'Main corporate delivery route.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'Archive route', departure_at: toSqlDateTime(archiveRouteDeparture), order_acceptance_ends_at: toSqlDateTime(archiveRouteCutoff), description: 'Past route for completed deliveries.', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('route_companies').insert([
     { route_id: 1, company_id: 2, created_at: now },
     { route_id: 2, company_id: 1, created_at: now },
-    { route_id: 2, company_id: 3, created_at: now },
+    { route_id: 3, company_id: 3, created_at: now },
   ]);
 
   await knex('orders').insert([
-    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, status: 'created', delivery_address: 'Moscow, Pushkina 10, office 12', contact_name: 'Ivan Ivanov', contact_phone: '+79990000004', scheduled_for: '2026-03-16 12:30:00', subtotal_cents: 134700, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 149600, comment: 'Call 10 minutes before arrival.', created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, status: 'paid', delivery_address: 'Moscow, Leningradsky 25', contact_name: 'Alexey Voronov', contact_phone: '+79990000006', scheduled_for: '2026-03-16 08:15:00', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, comment: 'Leave at reception.', created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, status: 'completed', delivery_address: 'Moscow, Novoslobodskaya 18', contact_name: 'Elena Kotova', contact_phone: '+79990000007', scheduled_for: '2026-03-14 12:00:00', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, comment: null, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
+    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 134700, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 149600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
   ]);
 
   await knex('order_items').insert([

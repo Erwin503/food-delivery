@@ -41,6 +41,7 @@ const router = Router();
  *         - orderNumber
  *         - userId
  *         - companyId
+ *         - routeId
  *         - status
  *         - subtotalCents
  *         - deliveryFeeCents
@@ -58,22 +59,11 @@ const router = Router();
  *           type: integer
  *         companyId:
  *           type: integer
+ *         routeId:
+ *           type: integer
  *         status:
  *           type: string
  *           enum: [created, paid, cooking, delivering, completed, cancelled]
- *         deliveryAddress:
- *           type: string
- *           nullable: true
- *         contactName:
- *           type: string
- *           nullable: true
- *         contactPhone:
- *           type: string
- *           nullable: true
- *         scheduledFor:
- *           type: string
- *           format: date-time
- *           nullable: true
  *         subtotalCents:
  *           type: integer
  *         deliveryFeeCents:
@@ -82,9 +72,6 @@ const router = Router();
  *           type: integer
  *         totalCents:
  *           type: integer
- *         comment:
- *           type: string
- *           nullable: true
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -98,55 +85,19 @@ const router = Router();
  *     CreateOrderRequest:
  *       type: object
  *       properties:
- *         deliveryAddress:
- *           type: string
- *           nullable: true
- *           example: Moscow, Tverskaya 1
- *         contactName:
- *           type: string
- *           nullable: true
- *           example: Ivan Ivanov
- *         contactPhone:
- *           type: string
- *           nullable: true
- *           example: "+79990000004"
- *         scheduledFor:
- *           type: string
- *           format: date-time
- *           nullable: true
  *         deliveryFeeCents:
  *           type: integer
  *           example: 1000
  *         discountCents:
  *           type: integer
  *           example: 200
- *         comment:
- *           type: string
- *           nullable: true
- *           example: Leave at reception
  *     UpdateOrderRequest:
  *       type: object
  *       properties:
- *         deliveryAddress:
- *           type: string
- *           nullable: true
- *         contactName:
- *           type: string
- *           nullable: true
- *         contactPhone:
- *           type: string
- *           nullable: true
- *         scheduledFor:
- *           type: string
- *           format: date-time
- *           nullable: true
  *         deliveryFeeCents:
  *           type: integer
  *         discountCents:
  *           type: integer
- *         comment:
- *           type: string
- *           nullable: true
  *     OrderDishRequest:
  *       type: object
  *       required:
@@ -193,6 +144,10 @@ const router = Router();
  *         name: userId
  *         schema:
  *           type: integer
+ *       - in: query
+ *         name: routeId
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Orders list
@@ -237,7 +192,7 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  * @swagger
  * /orders:
  *   post:
- *     summary: Create a new order draft for the current employee
+ *     summary: Create a new order draft for the current employee or manager
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -255,7 +210,7 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  *             schema:
  *               $ref: '#/components/schemas/Order'
  *       403:
- *         description: Only employees can create orders
+ *         description: Only employees or managers can create orders
  */
 router.post('/orders', authenticateToken, createOrder);
 
@@ -295,7 +250,7 @@ router.put('/orders/:id', authenticateToken, updateOrder);
  * @swagger
  * /orders/{id}:
  *   delete:
- *     summary: Cancel an order
+ *     summary: Cancel an order before route acceptance closes
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -309,7 +264,7 @@ router.put('/orders/:id', authenticateToken, updateOrder);
  *       204:
  *         description: Order cancelled
  *       409:
- *         description: Order cannot be cancelled
+ *         description: Order cannot be cancelled in the current route or status
  */
 router.delete('/orders/:id', authenticateToken, cancelOrder);
 

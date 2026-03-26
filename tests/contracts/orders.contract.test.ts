@@ -71,7 +71,6 @@ test('POST /api/orders creates a draft order for employee role', async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        comment: 'New order',
         deliveryFeeCents: 1000,
         discountCents: 200,
       }),
@@ -81,7 +80,33 @@ test('POST /api/orders creates a draft order for employee role', async () => {
     const payload = await response.json();
     assert.equal(payload.status, 'created');
     assert.equal(payload.companyId, 1);
+    assert.equal(payload.routeId, 2);
     assert.equal(payload.totalCents, 800);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/orders creates a draft order for manager role in the same company', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deliveryFeeCents: 500,
+      }),
+    });
+
+    assert.equal(response.status, 201);
+    const payload = await response.json();
+    assert.equal(payload.companyId, 1);
+    assert.equal(payload.userId, 2);
+    assert.equal(payload.routeId, 2);
   } finally {
     await stopTestServer(server);
   }
@@ -98,14 +123,12 @@ test('PUT /api/orders/:id updates order meta fields for owner or manager', async
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        comment: 'Updated comment',
         deliveryFeeCents: 3000,
       }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.comment, 'Updated comment');
     assert.equal(payload.deliveryFeeCents, 3000);
   } finally {
     await stopTestServer(server);
@@ -126,6 +149,50 @@ test('DELETE /api/orders/:id cancels an order for admin or manager', async () =>
     const order = await db('orders').where({ id: 1 }).first();
     assert.equal(order.status, 'cancelled');
     assert.ok(order.cancelled_at);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('PUT /api/orders/:id rejects updates after route cutoff time', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('routes').where({ id: 2 }).update({
+      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/1`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deliveryFeeCents: 3000,
+      }),
+    });
+
+    assert.equal(response.status, 409);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('DELETE /api/orders/:id rejects cancellation after route cutoff time', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('routes').where({ id: 2 }).update({
+      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/1`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(response.status, 409);
   } finally {
     await stopTestServer(server);
   }
@@ -222,6 +289,29 @@ test('PATCH /api/orders/:id/status changes order status through allowed transiti
     assert.equal(cookingResponse.status, 200);
     const payload = await cookingResponse.json();
     assert.equal(payload.status, 'cooking');
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/orders rejects creation after route cutoff time', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('routes').where({ id: 2 }).update({
+      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    assert.equal(response.status, 409);
   } finally {
     await stopTestServer(server);
   }
