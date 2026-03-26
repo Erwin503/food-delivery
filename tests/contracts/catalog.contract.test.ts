@@ -56,22 +56,28 @@ test('POST /api/categories creates a category for manager or admin', async () =>
   const { server, baseUrl } = await startTestServer();
 
   try {
+    const form = new FormData();
+    form.set('name', 'Soups');
+    form.set('sortOrder', '40');
+    form.set('image', new Blob(['fake-image'], { type: 'image/png' }), 'category.png');
+
     const response = await fetch(`${baseUrl}/api/categories`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${managerToken()}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name: 'Soups', sortOrder: 40 }),
+      body: form,
     });
 
     assert.equal(response.status, 201);
     const payload = await response.json();
     assert.equal(payload.name, 'Soups');
+    assert.match(payload.imageUrl, /^\/uploads\/catalog\/.+\.png$/);
 
     const category = await db('categories').where({ name: 'Soups' }).first();
     assert.ok(category);
     assert.equal(category.sort_order, 40);
+    assert.equal(typeof category.image_url, 'string');
   } finally {
     await stopTestServer(server);
   }
@@ -181,29 +187,32 @@ test('POST /api/dishes creates a dish for manager or admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
+    const form = new FormData();
+    form.set('categoryId', '2');
+    form.set('name', 'Greek salad');
+    form.set('description', 'Cucumber, tomato, feta.');
+    form.set('basePriceCents', '52900');
+    form.set('discountPriceCents', '47900');
+    form.set('isActive', 'true');
+    form.set('image', new Blob(['fake-image'], { type: 'image/png' }), 'dish.png');
+
     const response = await fetch(`${baseUrl}/api/dishes`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${managerToken()}`,
-        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        categoryId: 2,
-        name: 'Greek salad',
-        description: 'Cucumber, tomato, feta.',
-        basePriceCents: 52900,
-        discountPriceCents: 47900,
-        isActive: true,
-      }),
+      body: form,
     });
 
     assert.equal(response.status, 201);
     const payload = await response.json();
     assert.equal(payload.name, 'Greek salad');
+    assert.match(payload.imageUrl, /^\/uploads\/catalog\/.+\.png$/);
 
     const dish = await db('dishes').where({ name: 'Greek salad' }).first();
     assert.ok(dish);
     assert.equal(dish.category_id, 2);
+    assert.equal(typeof dish.image_url, 'string');
   } finally {
     await stopTestServer(server);
   }

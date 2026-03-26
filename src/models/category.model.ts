@@ -4,4 +4,5 @@ export interface CategoryModel extends SoftDeleteColumns {
   id: number;
   name: string;
   sort_order: number;
+  image_url: string | null;
 }

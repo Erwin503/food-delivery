@@ -14,6 +14,7 @@ import {
 } from '../controllers/catalog.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
+import { catalogImageUpload } from '../middleware/uploadMiddleware';
 
 const router = Router();
 
@@ -39,6 +40,10 @@ const router = Router();
  *         sortOrder:
  *           type: integer
  *           example: 10
+ *         imageUrl:
+ *           type: string
+ *           nullable: true
+ *           example: /uploads/catalog/1712345678901-file.png
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -69,6 +74,10 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           example: Tomato sauce, mozzarella, basil.
+ *         imageUrl:
+ *           type: string
+ *           nullable: true
+ *           example: /uploads/catalog/1712345678901-file.png
  *         basePriceCents:
  *           type: integer
  *           example: 59900
@@ -98,6 +107,9 @@ const router = Router();
  *         sortOrder:
  *           type: integer
  *           example: 40
+ *         image:
+ *           type: string
+ *           format: binary
  *     UpdateCategoryRequest:
  *       type: object
  *       properties:
@@ -107,12 +119,16 @@ const router = Router();
  *         sortOrder:
  *           type: integer
  *           example: 50
+ *         image:
+ *           type: string
+ *           format: binary
  *     CreateDishRequest:
  *       type: object
  *       required:
  *         - categoryId
  *         - name
- *         - priceCents
+ *         - basePriceCents
+ *         - discountPriceCents
  *       properties:
  *         categoryId:
  *           type: integer
@@ -123,6 +139,9 @@ const router = Router();
  *         description:
  *           type: string
  *           nullable: true
+ *         image:
+ *           type: string
+ *           format: binary
  *         basePriceCents:
  *           type: integer
  *           example: 79900
@@ -142,6 +161,9 @@ const router = Router();
  *         description:
  *           type: string
  *           nullable: true
+ *         image:
+ *           type: string
+ *           format: binary
  *         basePriceCents:
  *           type: integer
  *         discountPriceCents:
@@ -175,7 +197,7 @@ const router = Router();
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             $ref: '#/components/schemas/CreateCategoryRequest'
  *     responses:
@@ -189,7 +211,7 @@ const router = Router();
  *         description: Forbidden
  */
 router.get('/categories', authenticateToken, getCategories);
-router.post('/categories', authenticateToken, checkRole(['manager', 'admin']), createCategory);
+router.post('/categories', authenticateToken, checkRole(['manager', 'admin']), catalogImageUpload.single('image'), createCategory);
 
 /**
  * @swagger
@@ -228,7 +250,7 @@ router.post('/categories', authenticateToken, checkRole(['manager', 'admin']), c
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             $ref: '#/components/schemas/UpdateCategoryRequest'
  *     responses:
@@ -258,7 +280,7 @@ router.post('/categories', authenticateToken, checkRole(['manager', 'admin']), c
  *         description: Forbidden
  */
 router.get('/categories/:id', authenticateToken, getCategoryById);
-router.put('/categories/:id', authenticateToken, checkRole(['manager', 'admin']), updateCategory);
+router.put('/categories/:id', authenticateToken, checkRole(['manager', 'admin']), catalogImageUpload.single('image'), updateCategory);
 router.delete('/categories/:id', authenticateToken, checkRole(['manager', 'admin']), deleteCategory);
 
 /**
@@ -321,7 +343,7 @@ router.get('/categories/:id/dishes', authenticateToken, getDishesByCategory);
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             $ref: '#/components/schemas/CreateDishRequest'
  *     responses:
@@ -335,7 +357,7 @@ router.get('/categories/:id/dishes', authenticateToken, getDishesByCategory);
  *         description: Forbidden
  */
 router.get('/dishes', authenticateToken, getDishes);
-router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), createDish);
+router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), catalogImageUpload.single('image'), createDish);
 
 /**
  * @swagger
@@ -374,7 +396,7 @@ router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), creat
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             $ref: '#/components/schemas/UpdateDishRequest'
  *     responses:
@@ -404,7 +426,7 @@ router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), creat
  *         description: Forbidden
  */
 router.get('/dishes/:id', authenticateToken, getDishById);
-router.put('/dishes/:id', authenticateToken, checkRole(['manager', 'admin']), updateDish);
+router.put('/dishes/:id', authenticateToken, checkRole(['manager', 'admin']), catalogImageUpload.single('image'), updateDish);
 router.delete('/dishes/:id', authenticateToken, checkRole(['manager', 'admin']), deleteDish);
 
 export default router;

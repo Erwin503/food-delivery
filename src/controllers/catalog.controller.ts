@@ -3,16 +3,18 @@ import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CategoryModel, CompanyModel, DishModel } from '../models';
+import { buildUploadedFileUrl } from '../middleware/uploadMiddleware';
 
 type CategoryRow = CategoryModel;
 type DishRow = DishModel;
 
-const categoryColumns = ['id', 'name', 'sort_order', 'created_at', 'updated_at', 'deleted_at'] as const;
+const categoryColumns = ['id', 'name', 'sort_order', 'image_url', 'created_at', 'updated_at', 'deleted_at'] as const;
 const dishColumns = [
   'id',
   'category_id',
   'name',
   'description',
+  'image_url',
   'base_price_cents',
   'discount_price_cents',
   'is_active',
@@ -33,6 +35,7 @@ const toCategoryDto = (category: CategoryRow) => ({
   id: category.id,
   name: category.name,
   sortOrder: category.sort_order,
+  imageUrl: category.image_url,
   createdAt: toIsoString(category.created_at),
   updatedAt: toIsoString(category.updated_at),
 });
@@ -42,6 +45,7 @@ const toDishDto = (dish: DishRow, discounted: boolean) => ({
   categoryId: dish.category_id,
   name: dish.name,
   description: dish.description,
+  imageUrl: dish.image_url,
   basePriceCents: dish.base_price_cents,
   discountPriceCents: dish.discount_price_cents,
   priceCents: discounted ? dish.discount_price_cents : dish.base_price_cents,
@@ -139,6 +143,7 @@ export const createCategory = async (req: Request, res: Response, next: NextFunc
     const name = String(req.body.name || '').trim();
     const sortOrder =
       req.body.sortOrder === undefined ? await getNextCategorySortOrder() : Number(req.body.sortOrder);
+    const imageUrl = req.file ? buildUploadedFileUrl(req.file.filename) : null;
 
     if (!name) {
       throw new AppError('Category name is required', 400);
@@ -152,6 +157,7 @@ export const createCategory = async (req: Request, res: Response, next: NextFunc
     const inserted = await db('categories').insert({
       name,
       sort_order: sortOrder,
+      image_url: imageUrl,
       created_at: now,
       updated_at: now,
       deleted_at: null,
@@ -198,6 +204,10 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
       }
 
       patch.sort_order = sortOrder;
+    }
+
+    if (req.file) {
+      patch.image_url = buildUploadedFileUrl(req.file.filename);
     }
 
     await db('categories').where({ id: categoryId }).update(patch);
@@ -333,6 +343,7 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
     const categoryId = Number(req.body.categoryId);
     const name = String(req.body.name || '').trim();
     const description = req.body.description === undefined ? null : req.body.description;
+    const imageUrl = req.file ? buildUploadedFileUrl(req.file.filename) : null;
     const basePriceCents = Number(req.body.basePriceCents);
     const discountPriceCents = Number(req.body.discountPriceCents);
     const isActive = req.body.isActive === undefined ? true : Boolean(req.body.isActive);
@@ -357,6 +368,7 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
       category_id: categoryId,
       name,
       description,
+      image_url: imageUrl,
       base_price_cents: basePriceCents,
       discount_price_cents: discountPriceCents,
       is_active: isActive,
@@ -410,6 +422,10 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
 
     if ('description' in req.body) {
       patch.description = req.body.description ?? null;
+    }
+
+    if (req.file) {
+      patch.image_url = buildUploadedFileUrl(req.file.filename);
     }
 
     if ('basePriceCents' in req.body) {

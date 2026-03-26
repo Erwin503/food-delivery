@@ -49,6 +49,7 @@ const dishColumns = [
   'category_id',
   'name',
   'description',
+  'image_url',
   'base_price_cents',
   'discount_price_cents',
   'is_active',

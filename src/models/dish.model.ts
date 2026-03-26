@@ -5,6 +5,7 @@ export interface DishModel extends SoftDeleteColumns {
   category_id: number;
   name: string;
   description: string | null;
+  image_url: string | null;
   base_price_cents: number;
   discount_price_cents: number;
   is_active: boolean;
