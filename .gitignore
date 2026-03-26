@@ -28,6 +28,8 @@ jspm_packages/
 dist/
 *.tsbuildinfo
 
+uploads/
+
 # Build directories
 build/
 out/

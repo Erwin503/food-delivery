@@ -1,5 +1,8 @@
-require('ts-node/register');
 require('dotenv').config();
+
+if ((process.env.NODE_ENV ?? 'development') !== 'production') {
+  require('ts-node/register');
+}
 
 const baseConfig = {
   client: process.env.DB_CLIENT,

@@ -12,6 +12,7 @@ COPY migrations ./migrations
 COPY seeds ./seeds
 
 RUN npm run build
+RUN npm prune --omit=dev
 
 FROM node:20-bookworm-slim AS runner
 
