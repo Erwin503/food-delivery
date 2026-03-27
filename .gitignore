@@ -1,56 +1,41 @@
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Logs
-logs/
-*.log
-*.log.*
-log/
-logs/
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Dependency directories
+# Dependencies
 node_modules/
 jspm_packages/
 
-# Environment variables
+# Environment
 .env
 .env.local
 .env.*.local
 
-# TypeScript
+# Build output
 dist/
-*.tsbuildinfo
-
-uploads/
-
-# Build directories
 build/
 out/
+*.tsbuildinfo
 
-# IDEs and editors
+# Logs and runtime files
+logs/
+log/
+*.log
+*.log.*
+pids/
+*.pid
+*.pid.lock
+*.seed
+
+# Uploads
+uploads/
+
+# Coverage and caches
+coverage/
+.nyc_output/
+.cache/
+temp/
+tmp/
+
+# Editors and OS files
 .vscode/
 .idea/
 .DS_Store
-*.swp
-
-# OS generated files
 Thumbs.db
-.DS_Store
-
-# Debug
-coverage/
-.nyc_output/
-.vscode/
-
-# Miscellaneous
-temp/
-tmp/
-*.log
-.cache/
+*.swp
