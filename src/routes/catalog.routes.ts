@@ -36,7 +36,7 @@ const router = Router();
  *           example: 1
  *         name:
  *           type: string
- *           example: Pizza
+ *           example: Пицца
  *         sortOrder:
  *           type: integer
  *           example: 10
@@ -69,11 +69,11 @@ const router = Router();
  *           example: 1
  *         name:
  *           type: string
- *           example: Margherita
+ *           example: Маргарита
  *         description:
  *           type: string
  *           nullable: true
- *           example: Tomato sauce, mozzarella, basil.
+ *           example: Томатный соус, моцарелла, базилик.
  *         imageUrl:
  *           type: string
  *           nullable: true
@@ -103,7 +103,7 @@ const router = Router();
  *       properties:
  *         name:
  *           type: string
- *           example: Soups
+ *           example: Супы
  *         sortOrder:
  *           type: integer
  *           example: 40
@@ -115,7 +115,7 @@ const router = Router();
  *       properties:
  *         name:
  *           type: string
- *           example: Hot soups
+ *           example: Горячие супы
  *         sortOrder:
  *           type: integer
  *           example: 50
@@ -135,7 +135,7 @@ const router = Router();
  *           example: 1
  *         name:
  *           type: string
- *           example: Four cheeses
+ *           example: Четыре сыра
  *         description:
  *           type: string
  *           nullable: true

@@ -6,7 +6,16 @@
     "build": "tsc",
     "start": "node dist/src/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "node --require ts-node/register --test --test-concurrency=1 tests/index.test.ts",
+    "test:runner": "node --require ts-node/register tests/index.test.ts",
+    "test": "npm run test:all",
+    "test:all": "npm run test:runner",
+    "test:smoke": "node -e \"process.env.TEST_MODULE='smoke'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:auth": "node -e \"process.env.TEST_MODULE='auth'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:catalog": "node -e \"process.env.TEST_MODULE='catalog'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:companies": "node -e \"process.env.TEST_MODULE='companies'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:orders": "node -e \"process.env.TEST_MODULE='orders'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:reports": "node -e \"process.env.TEST_MODULE='reports'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
+    "test:routes": "node -e \"process.env.TEST_MODULE='routes'; require('ts-node/register'); require(require('path').resolve('tests/index.test.ts'));\"",
     "migrate": "knex migrate:latest",
     "migrate:rollback": "knex migrate:rollback",
     "migrate:make": "knex migrate:make"
@@ -30,6 +39,7 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.5",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -40,6 +50,7 @@
     "multer": "^2.1.1",
     "mysql2": "^3.11.3",
     "nodemailer": "^6.10.1",
+    "pdfkit": "^0.18.0",
     "qrcode": "^1.5.4",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",

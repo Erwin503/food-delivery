@@ -28,7 +28,7 @@ test('GET /api/categories returns sorted categories list', async () => {
     assert.equal(payload.length, 3);
     assert.deepEqual(
       payload.map((item: { name: string }) => item.name),
-      ['Pizza', 'Salads', 'Drinks']
+      ['Пицца', 'Салаты', 'Напитки']
     );
   } finally {
     await stopTestServer(server);
@@ -46,7 +46,7 @@ test('GET /api/categories/:id returns a category by id', async () => {
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.id, 2);
-    assert.equal(payload.name, 'Salads');
+    assert.equal(payload.name, 'Салаты');
   } finally {
     await stopTestServer(server);
   }
@@ -57,7 +57,7 @@ test('POST /api/categories creates a category for manager or admin', async () =>
 
   try {
     const form = new FormData();
-    form.set('name', 'Soups');
+    form.set('name', 'Супы');
     form.set('sortOrder', '40');
     form.set('image', new Blob(['fake-image'], { type: 'image/png' }), 'category.png');
 
@@ -71,10 +71,10 @@ test('POST /api/categories creates a category for manager or admin', async () =>
 
     assert.equal(response.status, 201);
     const payload = await response.json();
-    assert.equal(payload.name, 'Soups');
+    assert.equal(payload.name, 'Супы');
     assert.match(payload.imageUrl, /^\/uploads\/catalog\/.+\.png$/);
 
-    const category = await db('categories').where({ name: 'Soups' }).first();
+    const category = await db('categories').where({ name: 'Супы' }).first();
     assert.ok(category);
     assert.equal(category.sort_order, 40);
     assert.equal(typeof category.image_url, 'string');
@@ -93,12 +93,12 @@ test('PUT /api/categories/:id partially updates a category', async () => {
         Authorization: `Bearer ${managerToken()}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name: 'Fresh salads', sortOrder: 25 }),
+      body: JSON.stringify({ name: 'Свежие салаты', sortOrder: 25 }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.name, 'Fresh salads');
+    assert.equal(payload.name, 'Свежие салаты');
     assert.equal(payload.sortOrder, 25);
   } finally {
     await stopTestServer(server);
@@ -136,7 +136,7 @@ test('GET /api/dishes returns dishes with category and active filters', async ()
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.length, 1);
-    assert.equal(payload[0].name, 'Cranberry mors');
+    assert.equal(payload[0].name, 'Клюквенный морс');
     assert.equal(payload[0].isActive, true);
     assert.equal(payload[0].basePriceCents, 14900);
     assert.equal(payload[0].discountPriceCents, 12900);
@@ -157,7 +157,7 @@ test('GET /api/dishes/:id returns a dish by id', async () => {
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.id, 1);
-    assert.equal(payload.name, 'Margherita');
+    assert.equal(payload.name, 'Маргарита');
   } finally {
     await stopTestServer(server);
   }
@@ -176,7 +176,7 @@ test('GET /api/categories/:id/dishes returns dishes for the selected category', 
     assert.equal(payload.length, 2);
     assert.deepEqual(
       payload.map((item: { name: string }) => item.name),
-      ['Margherita', 'Pepperoni']
+      ['Маргарита', 'Пепперони']
     );
   } finally {
     await stopTestServer(server);
@@ -189,8 +189,8 @@ test('POST /api/dishes creates a dish for manager or admin', async () => {
   try {
     const form = new FormData();
     form.set('categoryId', '2');
-    form.set('name', 'Greek salad');
-    form.set('description', 'Cucumber, tomato, feta.');
+    form.set('name', 'Греческий салат');
+    form.set('description', 'Огурец, томат, фета.');
     form.set('basePriceCents', '52900');
     form.set('discountPriceCents', '47900');
     form.set('isActive', 'true');
@@ -206,10 +206,10 @@ test('POST /api/dishes creates a dish for manager or admin', async () => {
 
     assert.equal(response.status, 201);
     const payload = await response.json();
-    assert.equal(payload.name, 'Greek salad');
+    assert.equal(payload.name, 'Греческий салат');
     assert.match(payload.imageUrl, /^\/uploads\/catalog\/.+\.png$/);
 
-    const dish = await db('dishes').where({ name: 'Greek salad' }).first();
+    const dish = await db('dishes').where({ name: 'Греческий салат' }).first();
     assert.ok(dish);
     assert.equal(dish.category_id, 2);
     assert.equal(typeof dish.image_url, 'string');
@@ -229,7 +229,7 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        name: 'Tarragon lemonade zero',
+        name: 'Лимонад тархун зеро',
         basePriceCents: 13900,
         discountPriceCents: 11900,
         isActive: true,
@@ -238,7 +238,7 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.name, 'Tarragon lemonade zero');
+    assert.equal(payload.name, 'Лимонад тархун зеро');
     assert.equal(payload.priceCents, 13900);
     assert.equal(payload.basePriceCents, 13900);
     assert.equal(payload.discountPriceCents, 11900);

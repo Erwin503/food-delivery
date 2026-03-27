@@ -65,7 +65,7 @@ test('GET /api/companies/:id returns a single company by id', async () => {
     assert.equal(response.status, 200);
     assert.equal(forbiddenResponse.status, 403);
     const payload = await response.json();
-    assert.equal(payload.name, 'Romashka LLC');
+    assert.equal(payload.name, 'ООО Ромашка');
   } finally {
     await stopTestServer(server);
   }
@@ -82,15 +82,15 @@ test('POST /api/companies creates a company for admin role', async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        name: 'Orbit LLC',
-        description: 'New customer',
-        address: 'Moscow, Tverskaya 1',
+        name: 'ООО Орбита',
+        description: 'Новый клиент',
+        address: 'Москва, Тверская, 1',
       }),
     });
 
     assert.equal(response.status, 201);
     const payload = await response.json();
-    assert.equal(payload.name, 'Orbit LLC');
+    assert.equal(payload.name, 'ООО Орбита');
   } finally {
     await stopTestServer(server);
   }
@@ -107,13 +107,13 @@ test('PUT /api/companies/:id updates company fields for admin or manager', async
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        description: 'Updated by company manager',
+        description: 'Обновлено менеджером компании',
       }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.description, 'Updated by company manager');
+    assert.equal(payload.description, 'Обновлено менеджером компании');
   } finally {
     await stopTestServer(server);
   }

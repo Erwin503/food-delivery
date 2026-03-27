@@ -28,7 +28,7 @@ const router = Router();
  *           example: 1
  *         name:
  *           type: string
- *           example: Romashka LLC
+ *           example: ООО Ромашка
  *     Route:
  *       type: object
  *       required:
@@ -71,7 +71,7 @@ const router = Router();
  *       properties:
  *         name:
  *           type: string
- *           example: Day route
+ *           example: Дневной рейс
  *         departureAt:
  *           type: string
  *           format: date-time

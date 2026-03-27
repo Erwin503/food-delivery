@@ -26,19 +26,19 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 1');
 
   await knex('companies').insert([
-    { id: 1, name: 'Romashka LLC', description: 'Office customer with regular lunch orders.', address: 'Moscow, Pushkina 10, office 12', subscription_started_at: '2026-03-10 09:00:00', subscription_expires_at: '2026-04-10 09:00:00', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Vector JSC', description: 'Technology company with morning deliveries.', address: 'Moscow, Leningradsky 25', subscription_started_at: null, subscription_expires_at: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'Sever IE', description: 'Small team ordering lunches on weekdays.', address: 'Moscow, Novoslobodskaya 18', subscription_started_at: '2026-02-01 09:00:00', subscription_expires_at: '2026-03-01 09:00:00', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'ООО Ромашка', description: 'Офисный клиент с регулярными заказами обедов.', address: 'Москва, ул. Пушкина, 10, офис 12', subscription_started_at: '2026-03-10 09:00:00', subscription_expires_at: '2026-04-10 09:00:00', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'АО Вектор', description: 'Технологическая компания с утренними доставками.', address: 'Москва, Ленинградский проспект, 25', subscription_started_at: null, subscription_expires_at: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'ИП Север', description: 'Небольшая команда, заказывающая обеды по будням.', address: 'Москва, Новослободская, 18', subscription_started_at: '2026-02-01 09:00:00', subscription_expires_at: '2026-03-01 09:00:00', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('users').insert([
-    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'System Administrator', phone: '+79990000001', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Anna Smirnova', phone: '+79990000002', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Mikhail Petrov', phone: '+79990000003', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Ivan Ivanov', phone: '+79990000004', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Maria Sidorova', phone: '+79990000005', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Alexey Voronov', phone: '+79990000006', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Elena Kotova', phone: '+79990000007', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Системный администратор', phone: '+79990000001', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Анна Смирнова', phone: '+79990000002', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Михаил Петров', phone: '+79990000003', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Иван Иванов', phone: '+79990000004', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Мария Сидорова', phone: '+79990000005', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Алексей Воронов', phone: '+79990000006', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Елена Котова', phone: '+79990000007', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('auth_login_codes').insert([
@@ -60,17 +60,17 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('categories').insert([
-    { id: 1, name: 'Pizza', sort_order: 10, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Salads', sort_order: 20, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'Drinks', sort_order: 30, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'Пицца', sort_order: 10, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'Салаты', sort_order: 20, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'Напитки', sort_order: 30, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('dishes').insert([
-    { id: 1, category_id: 1, name: 'Margherita', description: 'Tomato sauce, mozzarella, basil.', base_price_cents: 59900, discount_price_cents: 53900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, category_id: 1, name: 'Pepperoni', description: 'Pepperoni, cheese, signature sauce.', base_price_cents: 74900, discount_price_cents: 67400, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, category_id: 2, name: 'Caesar with chicken', description: 'Chicken, romaine, parmesan, croutons.', base_price_cents: 48900, discount_price_cents: 43900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 4, category_id: 3, name: 'Cranberry mors', description: 'House drink 0.5L.', base_price_cents: 14900, discount_price_cents: 12900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
-    { id: 5, category_id: 3, name: 'Tarragon lemonade', description: 'Sparkling drink 0.33L.', base_price_cents: 12900, discount_price_cents: 10900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, category_id: 1, name: 'Маргарита', description: 'Томатный соус, моцарелла, базилик.', base_price_cents: 59900, discount_price_cents: 53900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, category_id: 1, name: 'Пепперони', description: 'Пепперони, сыр и фирменный соус.', base_price_cents: 74900, discount_price_cents: 67400, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, category_id: 2, name: 'Цезарь с курицей', description: 'Курица, романо, пармезан и сухарики.', base_price_cents: 48900, discount_price_cents: 43900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 4, category_id: 3, name: 'Клюквенный морс', description: 'Домашний напиток 0.5 л.', base_price_cents: 14900, discount_price_cents: 12900, is_active: true, created_at: now, updated_at: now, deleted_at: null },
+    { id: 5, category_id: 3, name: 'Лимонад тархун', description: 'Газированный напиток 0.33 л.', base_price_cents: 12900, discount_price_cents: 10900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   const runtimeNow = new Date();
@@ -87,9 +87,9 @@ export async function seed(knex: Knex): Promise<void> {
   const archiveRouteCutoff = new Date(archiveRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
 
   await knex('routes').insert([
-    { id: 1, name: 'Morning route', departure_at: toSqlDateTime(morningRouteDeparture), order_acceptance_ends_at: toSqlDateTime(morningRouteCutoff), description: 'North direction delivery route.', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Day route', departure_at: toSqlDateTime(dayRouteDeparture), order_acceptance_ends_at: toSqlDateTime(dayRouteCutoff), description: 'Main corporate delivery route.', created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'Archive route', departure_at: toSqlDateTime(archiveRouteDeparture), order_acceptance_ends_at: toSqlDateTime(archiveRouteCutoff), description: 'Past route for completed deliveries.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'Утренний рейс', departure_at: toSqlDateTime(morningRouteDeparture), order_acceptance_ends_at: toSqlDateTime(morningRouteCutoff), description: 'Маршрут доставки по северному направлению.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'Дневной рейс', departure_at: toSqlDateTime(dayRouteDeparture), order_acceptance_ends_at: toSqlDateTime(dayRouteCutoff), description: 'Основной корпоративный маршрут доставки.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'Архивный рейс', departure_at: toSqlDateTime(archiveRouteDeparture), order_acceptance_ends_at: toSqlDateTime(archiveRouteCutoff), description: 'Прошлый рейс для завершённых доставок.', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('route_companies').insert([
