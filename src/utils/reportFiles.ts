@@ -9,10 +9,12 @@ export interface ZipFileEntry {
 
 const PDF_FONT_CANDIDATES = [
   process.env.PDF_FONT_PATH,
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf',
+  '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
   'C:\\Windows\\Fonts\\arial.ttf',
   'C:\\Windows\\Fonts\\times.ttf',
-  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-  '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
 ].filter(Boolean) as string[];
 
 export const resolveReportFont = (): string | null => {

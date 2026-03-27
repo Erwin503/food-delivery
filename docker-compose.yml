@@ -36,6 +36,7 @@ services:
       DB_USER: ${DB_USER:-cook}
       DB_PASSWORD: ${DB_PASSWORD:-root}
       DB_DATABASE: ${DB_DATABASE:-cook}
+      PDF_FONT_PATH: ${PDF_FONT_PATH:-/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf}
     depends_on:
       db:
         condition: service_healthy
