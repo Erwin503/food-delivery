@@ -47,6 +47,8 @@ const router = Router();
  *         - deliveryFeeCents
  *         - discountCents
  *         - totalCents
+ *         - companyPaidCents
+ *         - employeeDebtCents
  *         - createdAt
  *         - updatedAt
  *       properties:
@@ -71,6 +73,10 @@ const router = Router();
  *         discountCents:
  *           type: integer
  *         totalCents:
+ *           type: integer
+ *         companyPaidCents:
+ *           type: integer
+ *         employeeDebtCents:
  *           type: integer
  *         createdAt:
  *           type: string

@@ -8,6 +8,8 @@ export interface UserDto {
   fullName: string | null;
   phone: string | null;
   avatarUrl: string | null;
+  orderLimitCents: number;
+  debtCents: number;
   createdAt: string;
   updatedAt: string;
 }

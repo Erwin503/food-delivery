@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  acceptCompanyUserDebtPayment,
   assignCompanyUser,
   createCompany,
   createCompanyJoinCode,
@@ -11,6 +12,7 @@ import {
   joinCompanyByCode,
   purchaseCompanySubscription,
   removeCompanyUser,
+  setCompanyUserLimit,
   setCompanyManager,
   updateCompany,
 } from '../controllers/companies.controller';
@@ -27,6 +29,7 @@ const router = Router();
  *       required:
  *         - id
  *         - name
+ *         - debtCents
  *         - createdAt
  *         - updatedAt
  *       properties:
@@ -40,6 +43,8 @@ const router = Router();
  *         address:
  *           type: string
  *           nullable: true
+ *         debtCents:
+ *           type: integer
  *         subscriptionStartedAt:
  *           type: string
  *           format: date-time
@@ -95,6 +100,22 @@ const router = Router();
  *       properties:
  *         userId:
  *           type: integer
+ *     UpdateUserLimitRequest:
+ *       type: object
+ *       required:
+ *         - orderLimitCents
+ *       properties:
+ *         orderLimitCents:
+ *           type: integer
+ *           minimum: 0
+ *     AcceptDebtPaymentRequest:
+ *       type: object
+ *       required:
+ *         - amountCents
+ *       properties:
+ *         amountCents:
+ *           type: integer
+ *           minimum: 1
  *     CompanyJoinCodeResponse:
  *       type: object
  *       required:
@@ -296,6 +317,76 @@ router.delete('/companies/:id', authenticateToken, deleteCompany);
  */
 router.get('/companies/:id/users', authenticateToken, getCompanyUsers);
 router.post('/companies/:id/users', authenticateToken, assignCompanyUser);
+
+/**
+ * @swagger
+ * /companies/{id}/users/{userId}/limit:
+ *   put:
+ *     summary: Set order limit for a company member
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateUserLimitRequest'
+ *     responses:
+ *       200:
+ *         description: Updated user with new order limit
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ */
+router.put('/companies/:id/users/:userId/limit', authenticateToken, setCompanyUserLimit);
+
+/**
+ * @swagger
+ * /companies/{id}/users/{userId}/debt-payment:
+ *   post:
+ *     summary: Accept debt payment from a company member
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AcceptDebtPaymentRequest'
+ *     responses:
+ *       200:
+ *         description: Updated user after debt payment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ */
+router.post('/companies/:id/users/:userId/debt-payment', authenticateToken, acceptCompanyUserDebtPayment);
 
 /**
  * @swagger

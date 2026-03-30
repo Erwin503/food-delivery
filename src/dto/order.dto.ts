@@ -24,6 +24,8 @@ export interface OrderDto {
   deliveryFeeCents: number;
   discountCents: number;
   totalCents: number;
+  companyPaidCents: number;
+  employeeDebtCents: number;
   createdAt: string;
   updatedAt: string;
   items?: OrderItemDto[];

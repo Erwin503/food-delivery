@@ -53,7 +53,22 @@ const requireAdmin = async (req: AuthRequest): Promise<UserModel> => {
   }
 
   const user = await db<UserModel>('users')
-    .select('id', 'email', 'role', 'company_id', 'password_hash', 'email_verified_at', 'full_name', 'phone', 'avatar_url', 'created_at', 'updated_at', 'deleted_at')
+    .select(
+      'id',
+      'email',
+      'role',
+      'company_id',
+      'password_hash',
+      'email_verified_at',
+      'full_name',
+      'phone',
+      'avatar_url',
+      'order_limit_cents',
+      'debt_cents',
+      'created_at',
+      'updated_at',
+      'deleted_at'
+    )
     .where({ id: req.user.id })
     .whereNull('deleted_at')
     .first();

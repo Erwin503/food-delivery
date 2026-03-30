@@ -12,6 +12,8 @@ export const toUserDto = (user: UserModel): UserDto => ({
   fullName: user.full_name,
   phone: user.phone,
   avatarUrl: user.avatar_url,
+  orderLimitCents: user.order_limit_cents,
+  debtCents: user.debt_cents,
   createdAt: toIsoString(user.created_at),
   updatedAt: toIsoString(user.updated_at),
 });

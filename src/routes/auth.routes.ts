@@ -30,6 +30,8 @@ const router = Router();
  *         - email
  *         - role
  *         - companyId
+ *         - orderLimitCents
+ *         - debtCents
  *         - createdAt
  *         - updatedAt
  *       properties:
@@ -60,6 +62,12 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           example: https://example.com/avatar.png
+ *         orderLimitCents:
+ *           type: integer
+ *           example: 150000
+ *         debtCents:
+ *           type: integer
+ *           example: 25900
  *         createdAt:
  *           type: string
  *           format: date-time

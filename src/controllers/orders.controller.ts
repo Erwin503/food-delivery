@@ -11,6 +11,7 @@ import {
   RouteModel,
   UserModel,
 } from '../models';
+import { calculateOrderBilling } from '../utils/orderBilling';
 
 const orderColumns = [
   'id',
@@ -23,6 +24,8 @@ const orderColumns = [
   'delivery_fee_cents',
   'discount_cents',
   'total_cents',
+  'company_paid_cents',
+  'employee_debt_cents',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -39,6 +42,8 @@ const userColumns = [
   'full_name',
   'phone',
   'avatar_url',
+  'order_limit_cents',
+  'debt_cents',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -86,6 +91,8 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   deliveryFeeCents: order.delivery_fee_cents,
   discountCents: order.discount_cents,
   totalCents: order.total_cents,
+  companyPaidCents: order.company_paid_cents,
+  employeeDebtCents: order.employee_debt_cents,
   createdAt: toIsoString(order.created_at),
   updatedAt: toIsoString(order.updated_at),
   items: items?.map((item) => ({
@@ -153,7 +160,7 @@ const requireDish = async (id: number): Promise<DishModel> => {
 
 const loadCompany = async (id: number): Promise<Pick<CompanyModel, 'id' | 'address' | 'subscription_expires_at'> | undefined> =>
   db<CompanyModel>('companies')
-    .select('id', 'address', 'subscription_expires_at')
+    .select('id', 'address', 'subscription_expires_at', 'debt_cents')
     .where({ id })
     .whereNull('deleted_at')
     .first();
@@ -250,6 +257,16 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
     throw new AppError('Order not found', 404);
   }
 
+  const user = await trx<UserModel>('users')
+    .select(...userColumns)
+    .where({ id: order.user_id })
+    .whereNull('deleted_at')
+    .first();
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
   const sumRow = await trx<OrderItemModel>('order_items')
     .where({ order_id: orderId })
     .sum<{ subtotal: number | null }>('line_total_cents as subtotal')
@@ -257,10 +274,15 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
 
   const subtotalCents = Number(sumRow?.subtotal ?? 0);
   const totalCents = Math.max(subtotalCents + order.delivery_fee_cents - order.discount_cents, 0);
+  const billing = calculateOrderBilling(totalCents, {
+    orderLimitCents: user.order_limit_cents,
+  });
 
   await trx('orders').where({ id: orderId }).update({
     subtotal_cents: subtotalCents,
     total_cents: totalCents,
+    company_paid_cents: billing.companyPaidCents,
+    employee_debt_cents: billing.employeeDebtCents,
     updated_at: new Date(),
   });
 };
@@ -400,6 +422,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         changed_by_user_id: currentUser.id,
         created_at: now,
       });
+
+      await recalculateOrderTotals(trx, orderId);
 
       return orderId;
     });
@@ -650,6 +674,47 @@ export const patchOrderStatus = async (req: AuthRequest, res: Response, next: Ne
 
     const now = new Date();
     await db.transaction(async (trx) => {
+      if (order.status === 'created' && nextStatus === 'paid') {
+        await recalculateOrderTotals(trx, orderId);
+
+        const refreshedOrder = await trx<OrderModel>('orders')
+          .select(...orderColumns)
+          .where({ id: orderId })
+          .first();
+
+        if (!refreshedOrder) {
+          throw new AppError('Order not found', 404);
+        }
+
+        if (refreshedOrder.employee_debt_cents > 0) {
+          await trx('users').where({ id: refreshedOrder.user_id }).update({
+            debt_cents: trx.raw('debt_cents + ?', [refreshedOrder.employee_debt_cents]),
+            updated_at: now,
+          });
+        }
+
+        if (refreshedOrder.company_paid_cents > 0) {
+          await trx('companies').where({ id: refreshedOrder.company_id }).update({
+            debt_cents: trx.raw('debt_cents + ?', [refreshedOrder.company_paid_cents]),
+            updated_at: now,
+          });
+        }
+      }
+
+      if (order.status === 'paid' && nextStatus === 'cancelled' && order.employee_debt_cents > 0) {
+        await trx('users').where({ id: order.user_id }).update({
+          debt_cents: trx.raw('GREATEST(debt_cents - ?, 0)', [order.employee_debt_cents]),
+          updated_at: now,
+        });
+      }
+
+      if (order.status === 'paid' && nextStatus === 'cancelled' && order.company_paid_cents > 0) {
+        await trx('companies').where({ id: order.company_id }).update({
+          debt_cents: trx.raw('GREATEST(debt_cents - ?, 0)', [order.company_paid_cents]),
+          updated_at: now,
+        });
+      }
+
       await trx('orders').where({ id: orderId }).update({
         status: nextStatus,
         cancelled_at: nextStatus === 'cancelled' ? now : order.cancelled_at,

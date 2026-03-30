@@ -26,19 +26,19 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 1');
 
   await knex('companies').insert([
-    { id: 1, name: 'ООО Ромашка', description: 'Офисный клиент с регулярными заказами обедов.', address: 'Москва, ул. Пушкина, 10, офис 12', subscription_started_at: '2026-03-10 09:00:00', subscription_expires_at: '2026-04-10 09:00:00', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'АО Вектор', description: 'Технологическая компания с утренними доставками.', address: 'Москва, Ленинградский проспект, 25', subscription_started_at: null, subscription_expires_at: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'ИП Север', description: 'Небольшая команда, заказывающая обеды по будням.', address: 'Москва, Новослободская, 18', subscription_started_at: '2026-02-01 09:00:00', subscription_expires_at: '2026-03-01 09:00:00', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'ООО Ромашка', description: 'Офисный клиент с регулярными заказами обедов.', address: 'Москва, ул. Пушкина, 10, офис 12', debt_cents: 0, subscription_started_at: '2026-03-10 09:00:00', subscription_expires_at: '2026-04-10 09:00:00', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'АО Вектор', description: 'Технологическая компания с утренними доставками.', address: 'Москва, Ленинградский проспект, 25', debt_cents: 80000, subscription_started_at: null, subscription_expires_at: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'ИП Север', description: 'Небольшая команда, заказывающая обеды по будням.', address: 'Москва, Новослободская, 18', debt_cents: 58800, subscription_started_at: '2026-02-01 09:00:00', subscription_expires_at: '2026-03-01 09:00:00', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('users').insert([
-    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Системный администратор', phone: '+79990000001', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Анна Смирнова', phone: '+79990000002', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Михаил Петров', phone: '+79990000003', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Иван Иванов', phone: '+79990000004', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Мария Сидорова', phone: '+79990000005', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Алексей Воронов', phone: '+79990000006', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
-    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Елена Котова', phone: '+79990000007', avatar_url: null, created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, email: 'admin@cook.local', role: 'admin', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Системный администратор', phone: '+79990000001', avatar_url: null, order_limit_cents: 0, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, email: 'manager.romashka@cook.local', role: 'manager', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Анна Смирнова', phone: '+79990000002', avatar_url: null, order_limit_cents: 180000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, email: 'manager.vector@cook.local', role: 'manager', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Михаил Петров', phone: '+79990000003', avatar_url: null, order_limit_cents: 120000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 4, email: 'employee.ivanov@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Иван Иванов', phone: '+79990000004', avatar_url: null, order_limit_cents: 100000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Мария Сидорова', phone: '+79990000005', avatar_url: null, order_limit_cents: 90000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Алексей Воронов', phone: '+79990000006', avatar_url: null, order_limit_cents: 80000, debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null },
+    { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Елена Котова', phone: '+79990000007', avatar_url: null, order_limit_cents: 70000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('auth_login_codes').insert([
@@ -99,9 +99,9 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('orders').insert([
-    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 134700, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 149600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
+    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 134700, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 149600, company_paid_cents: 100000, employee_debt_cents: 49600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, company_paid_cents: 80000, employee_debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, company_paid_cents: 58800, employee_debt_cents: 0, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
   ]);
 
   await knex('order_items').insert([

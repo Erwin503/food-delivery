@@ -3,6 +3,7 @@ export interface CompanyDto {
   name: string;
   description: string | null;
   address: string | null;
+  debtCents: number;
   subscriptionStartedAt: string | null;
   subscriptionExpiresAt: string | null;
   hasActiveSubscription: boolean;

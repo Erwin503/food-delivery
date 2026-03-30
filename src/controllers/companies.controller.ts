@@ -13,6 +13,7 @@ const companyColumns = [
   'name',
   'description',
   'address',
+  'debt_cents',
   'subscription_started_at',
   'subscription_expires_at',
   'created_at',
@@ -29,6 +30,8 @@ const userColumns = [
   'full_name',
   'phone',
   'avatar_url',
+  'order_limit_cents',
+  'debt_cents',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -42,6 +45,7 @@ const toCompanyDto = (company: CompanyModel) => ({
   name: company.name,
   description: company.description,
   address: company.address,
+  debtCents: company.debt_cents,
   subscriptionStartedAt: company.subscription_started_at ? toIsoString(company.subscription_started_at) : null,
   subscriptionExpiresAt: company.subscription_expires_at ? toIsoString(company.subscription_expires_at) : null,
   hasActiveSubscription:
@@ -141,6 +145,8 @@ const loadCompanyManager = async (companyId: number): Promise<UserModel | undefi
       'u.full_name',
       'u.phone',
       'u.avatar_url',
+      'u.order_limit_cents',
+      'u.debt_cents',
       'u.created_at',
       'u.updated_at',
       'u.deleted_at'
@@ -154,6 +160,20 @@ const addOneMonth = (date: Date): Date => {
   const next = new Date(date);
   next.setMonth(next.getMonth() + 1);
   return next;
+};
+
+const requireCompanyMember = async (companyId: number, userId: number): Promise<UserModel> => {
+  const user = await requireUserById(userId);
+
+  if (user.company_id !== companyId) {
+    throw new AppError('User does not belong to this company', 404);
+  }
+
+  if (user.role === 'admin') {
+    throw new AppError('Admin is not managed through company settings', 409);
+  }
+
+  return user;
 };
 
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -217,6 +237,7 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
       name,
       description,
       address,
+      debt_cents: 0,
       subscription_started_at: null,
       subscription_expires_at: null,
       created_at: now,
@@ -620,6 +641,65 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
     });
 
     const updatedUser = await requireUserById(currentUser.id);
+    res.json(toUserDto(updatedUser));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setCompanyUserLimit = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const companyId = Number(req.params.id);
+    const userId = Number(req.params.userId);
+    const orderLimitCents = Number(req.body.orderLimitCents);
+
+    if (!companyId || !userId || !Number.isFinite(orderLimitCents) || orderLimitCents < 0) {
+      throw new AppError('Company id, user id, and non-negative orderLimitCents are required', 400);
+    }
+
+    const actor = await requireCurrentUser(req);
+    await requireManagerOrAdminForCompany(req, companyId);
+    const targetUser = await requireCompanyMember(companyId, userId);
+
+    if (actor.role === 'manager' && targetUser.role !== 'employee') {
+      throw new AppError('Manager can set limits only for employees of their company', 403);
+    }
+
+    await db('users').where({ id: userId }).update({
+      order_limit_cents: orderLimitCents,
+      updated_at: new Date(),
+    });
+
+    const updatedUser = await requireUserById(userId);
+    res.json(toUserDto(updatedUser));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const acceptCompanyUserDebtPayment = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      throw new AppError('Forbidden', 403);
+    }
+
+    const companyId = Number(req.params.id);
+    const userId = Number(req.params.userId);
+    const amountCents = Number(req.body.amountCents);
+
+    if (!companyId || !userId || !Number.isFinite(amountCents) || amountCents <= 0) {
+      throw new AppError('Company id, user id, and positive amountCents are required', 400);
+    }
+
+    await requireCompany(companyId);
+    await requireCompanyMember(companyId, userId);
+
+    await db('users').where({ id: userId }).update({
+      debt_cents: db.raw('GREATEST(debt_cents - ?, 0)', [amountCents]),
+      updated_at: new Date(),
+    });
+
+    const updatedUser = await requireUserById(userId);
     res.json(toUserDto(updatedUser));
   } catch (error) {
     next(error);

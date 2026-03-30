@@ -294,6 +294,66 @@ test('PATCH /api/orders/:id/status changes order status through allowed transiti
   }
 });
 
+test('PATCH /api/orders/:id/status adds debt only for the part above user limit', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('users').where({ id: 4 }).update({
+      order_limit_cents: 100000,
+      debt_cents: 0,
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/1/status`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'paid' }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.companyPaidCents, 100000);
+    assert.equal(payload.employeeDebtCents, 49600);
+
+    const user = await db('users').where({ id: 4 }).first();
+    assert.equal(user.debt_cents, 49600);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('PATCH /api/orders/:id/status does not add debt when order fits into limit', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('users').where({ id: 4 }).update({
+      order_limit_cents: 200000,
+      debt_cents: 0,
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/1/status`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'paid' }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.companyPaidCents, 149600);
+    assert.equal(payload.employeeDebtCents, 0);
+
+    const user = await db('users').where({ id: 4 }).first();
+    assert.equal(user.debt_cents, 0);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('POST /api/orders rejects creation after route cutoff time', async () => {
   const { server, baseUrl } = await startTestServer();
 

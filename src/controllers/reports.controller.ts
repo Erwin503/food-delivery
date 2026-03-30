@@ -73,6 +73,8 @@ const USER_COLUMNS = [
   'full_name',
   'phone',
   'avatar_url',
+  'order_limit_cents',
+  'debt_cents',
   'created_at',
   'updated_at',
   'deleted_at',
