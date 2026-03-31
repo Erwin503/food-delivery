@@ -91,13 +91,14 @@ const router = Router();
  *             $ref: '#/components/schemas/OrderItem'
  *     CreateOrderRequest:
  *       type: object
+ *       required:
+ *         - items
  *       properties:
- *         deliveryFeeCents:
- *           type: integer
- *           example: 1000
- *         discountCents:
- *           type: integer
- *           example: 200
+ *         items:
+ *           type: array
+ *           minItems: 1
+ *           items:
+ *             $ref: '#/components/schemas/OrderDishRequest'
  *     UpdateOrderRequest:
  *       type: object
  *       properties:
@@ -199,12 +200,12 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  * @swagger
  * /orders:
  *   post:
- *     summary: Create a new order draft for the current employee or manager
+ *     summary: Create a new order draft from dishes and quantities
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
- *       required: false
+ *       required: true
  *       content:
  *         application/json:
  *           schema:

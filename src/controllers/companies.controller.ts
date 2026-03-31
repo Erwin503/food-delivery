@@ -5,6 +5,9 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { CompanyJoinCodeModel, CompanyManagerModel, CompanyModel, UserModel } from '../models';
 import { generateLoginCode } from '../utils/auth';
 import { hasCompanyManagementAccess } from '../utils/companyAccess';
+import { toIsoString } from '../utils/dateMapper';
+import { requireEntity } from '../utils/entityGuards';
+import { parseRequiredId } from '../utils/requestParams';
 import {
   loadUserByEmail,
   loadUserById,
@@ -28,9 +31,6 @@ const companyColumns = [
   'updated_at',
   'deleted_at',
 ] as const;
-const toIsoString = (value: string | Date | undefined): string =>
-  new Date(value ?? new Date(0)).toISOString();
-
 const toCompanyDto = (company: CompanyModel) => ({
   id: company.id,
   name: company.name,
@@ -53,15 +53,8 @@ const loadCompanyById = async (id: number): Promise<CompanyModel | undefined> =>
     .whereNull('deleted_at')
     .first();
 
-const requireCompany = async (id: number): Promise<CompanyModel> => {
-  const company = await loadCompanyById(id);
-
-  if (!company) {
-    throw new AppError('Company not found', 404);
-  }
-
-  return company;
-};
+const requireCompany = async (id: number): Promise<CompanyModel> =>
+  requireEntity(() => loadCompanyById(id), 'Company not found');
 
 const requireCurrentUser = async (req: AuthRequest): Promise<UserModel> => {
   return requireAuthenticatedUser(req.user);
@@ -156,11 +149,7 @@ export const getCompanies = async (req: AuthRequest, res: Response, next: NextFu
 
 export const getCompanyById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     const company = await requireCompanyVisibility(req, companyId);
     res.json(toCompanyDto(company));
@@ -202,11 +191,7 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
 
 export const updateCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireManagerOrAdminForCompany(req, companyId);
 
@@ -243,11 +228,7 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
 
 export const deleteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireCompany(companyId);
 
@@ -265,11 +246,7 @@ export const deleteCompany = async (req: AuthRequest, res: Response, next: NextF
 
 export const getCompanyUsers = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireManagerOrAdminForCompany(req, companyId);
 
@@ -287,11 +264,7 @@ export const getCompanyUsers = async (req: AuthRequest, res: Response, next: Nex
 
 export const assignCompanyUser = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireCompany(companyId);
 
@@ -336,12 +309,8 @@ export const assignCompanyUser = async (req: AuthRequest, res: Response, next: N
 
 export const removeCompanyUser = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-    const userId = Number(req.params.userId);
-
-    if (!companyId || !userId) {
-      throw new AppError('Company id and user id are required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
+    const userId = parseRequiredId(req.params.userId, 'User id');
 
     await requireManagerOrAdminForCompany(req, companyId);
 
@@ -377,11 +346,7 @@ export const removeCompanyUser = async (req: AuthRequest, res: Response, next: N
 
 export const getCompanyManager = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireCompanyVisibility(req, companyId);
 
@@ -394,10 +359,10 @@ export const getCompanyManager = async (req: AuthRequest, res: Response, next: N
 
 export const setCompanyManager = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
+    const companyId = parseRequiredId(req.params.id, 'Company id');
     const userId = Number(req.body.userId);
 
-    if (!companyId || !userId) {
+    if (!userId) {
       throw new AppError('Company id and userId are required', 400);
     }
 
@@ -471,11 +436,7 @@ export const setCompanyManager = async (req: AuthRequest, res: Response, next: N
 
 export const createCompanyJoinCode = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
-    }
+    const companyId = parseRequiredId(req.params.id, 'Company id');
 
     await requireManagerOrAdminForCompany(req, companyId);
 
@@ -588,11 +549,11 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
 
 export const setCompanyUserLimit = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-    const userId = Number(req.params.userId);
+    const companyId = parseRequiredId(req.params.id, 'Company id');
+    const userId = parseRequiredId(req.params.userId, 'User id');
     const orderLimitCents = Number(req.body.orderLimitCents);
 
-    if (!companyId || !userId || !Number.isFinite(orderLimitCents) || orderLimitCents < 0) {
+    if (!Number.isFinite(orderLimitCents) || orderLimitCents < 0) {
       throw new AppError('Company id, user id, and non-negative orderLimitCents are required', 400);
     }
 
@@ -618,11 +579,11 @@ export const setCompanyUserLimit = async (req: AuthRequest, res: Response, next:
 
 export const acceptCompanyUserDebtPayment = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
-    const userId = Number(req.params.userId);
+    const companyId = parseRequiredId(req.params.id, 'Company id');
+    const userId = parseRequiredId(req.params.userId, 'User id');
     const amountCents = Number(req.body.amountCents);
 
-    if (!companyId || !userId || !Number.isFinite(amountCents) || amountCents <= 0) {
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
       throw new AppError('Company id, user id, and positive amountCents are required', 400);
     }
 

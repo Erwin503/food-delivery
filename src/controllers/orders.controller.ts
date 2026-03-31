@@ -12,7 +12,10 @@ import {
   UserModel,
 } from '../models';
 import { hasCompanyManagementAccess } from '../utils/companyAccess';
+import { toNullableIsoString } from '../utils/dateMapper';
+import { requireEntity } from '../utils/entityGuards';
 import { calculateOrderBilling } from '../utils/orderBilling';
+import { parseRequiredId } from '../utils/requestParams';
 import {
   requireAuthenticatedUser,
   USER_COLUMNS,
@@ -62,9 +65,6 @@ const routeColumns = [
   'deleted_at',
 ] as const;
 
-const toIsoString = (value: string | Date | undefined | null): string | null =>
-  value ? new Date(value).toISOString() : null;
-
 const hasActiveSubscription = (company?: Pick<CompanyModel, 'subscription_expires_at'> | null): boolean =>
   Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
 
@@ -81,8 +81,8 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   totalCents: order.total_cents,
   companyPaidCents: order.company_paid_cents,
   employeeDebtCents: order.employee_debt_cents,
-  createdAt: toIsoString(order.created_at),
-  updatedAt: toIsoString(order.updated_at),
+  createdAt: toNullableIsoString(order.created_at),
+  updatedAt: toNullableIsoString(order.updated_at),
   items: items?.map((item) => ({
     dishId: item.dish_id,
     qty: item.qty,
@@ -108,24 +108,21 @@ const loadOrderItems = async (orderId: number): Promise<OrderItemModel[]> =>
     .where({ order_id: orderId })
     .orderBy('dish_id', 'asc');
 
-const requireOrder = async (id: number): Promise<OrderModel> => {
-  const order = await loadOrderById(id);
-
-  if (!order) {
-    throw new AppError('Order not found', 404);
-  }
-
-  return order;
-};
+const requireOrder = async (id: number): Promise<OrderModel> =>
+  requireEntity(() => loadOrderById(id), 'Order not found');
 
 const requireDish = async (id: number): Promise<DishModel> => {
-  const dish = await db<DishModel>('dishes')
-    .select(...dishColumns)
-    .where({ id })
-    .whereNull('deleted_at')
-    .first();
+  const dish = await requireEntity(
+    () =>
+      db<DishModel>('dishes')
+        .select(...dishColumns)
+        .where({ id })
+        .whereNull('deleted_at')
+        .first(),
+    'Dish not found'
+  );
 
-  if (!dish || !dish.is_active) {
+  if (!dish.is_active) {
     throw new AppError('Dish not found', 404);
   }
 
@@ -274,6 +271,23 @@ const getNextOrderNumber = async (): Promise<string> => {
   return `${prefix}-${nextNumber}`;
 };
 
+const parseCreateOrderItems = (payload: unknown): Array<{ dishId: number; qty: number }> => {
+  if (!Array.isArray(payload) || payload.length === 0) {
+    throw new AppError('Order items are required', 400);
+  }
+
+  return payload.map((item) => {
+    const dishId = Number((item as { dishId?: unknown })?.dishId);
+    const qty = Number((item as { qty?: unknown })?.qty);
+
+    if (!dishId || !qty || qty < 1) {
+      throw new AppError('Each order item must include dishId and qty >= 1', 400);
+    }
+
+    return { dishId, qty };
+  });
+};
+
 export const getOrders = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const currentUser = await loadCurrentUser(req);
@@ -312,11 +326,7 @@ export const getOrders = async (req: AuthRequest, res: Response, next: NextFunct
 
 export const getOrderById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
-
-    if (!orderId) {
-      throw new AppError('Order id is required', 400);
-    }
+    const orderId = parseRequiredId(req.params.id, 'Order id');
 
     const order = await requireOrder(orderId);
     await requireOrderViewer(req, order);
@@ -331,18 +341,20 @@ export const getOrderById = async (req: AuthRequest, res: Response, next: NextFu
 export const createOrder = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const currentUser = await loadCurrentUser(req);
+    const items = parseCreateOrderItems(req.body.items);
 
     if (!currentUser.company_id) {
       throw new AppError('User must belong to a company to create an order', 409);
     }
 
-    const company = await loadCompany(currentUser.company_id);
+    const companyId = currentUser.company_id;
+    const company = await loadCompany(companyId);
 
     if (!company) {
       throw new AppError('Company not found', 404);
     }
 
-    const route = await getAvailableRouteForCompany(currentUser.company_id);
+    const route = await getAvailableRouteForCompany(companyId);
 
     if (!route) {
       throw new AppError('No active route is available for this company', 409);
@@ -350,21 +362,20 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
     const now = new Date();
     const orderNumber = await getNextOrderNumber();
-    const deliveryFeeCents = Number(req.body.deliveryFeeCents ?? 0);
-    const discountCents = Number(req.body.discountCents ?? 0);
-    const totalCents = Math.max(deliveryFeeCents - discountCents, 0);
 
     const inserted = await db.transaction(async (trx) => {
       const result = await trx('orders').insert({
         order_number: orderNumber,
         user_id: currentUser.id,
-        company_id: currentUser.company_id,
+        company_id: companyId,
         route_id: route.id,
         status: 'created',
         subtotal_cents: 0,
-        delivery_fee_cents: deliveryFeeCents,
-        discount_cents: discountCents,
-        total_cents: totalCents,
+        delivery_fee_cents: 0,
+        discount_cents: 0,
+        total_cents: 0,
+        company_paid_cents: 0,
+        employee_debt_cents: 0,
         created_at: now,
         updated_at: now,
         deleted_at: null,
@@ -381,13 +392,49 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         created_at: now,
       });
 
+      for (const item of items) {
+        const dish = await requireDish(item.dishId);
+        const priceCents = await getOrderDishPrice(
+          {
+            id: orderId,
+            order_number: orderNumber,
+            user_id: currentUser.id,
+            company_id: companyId,
+            route_id: route.id,
+            status: 'created',
+            subtotal_cents: 0,
+            delivery_fee_cents: 0,
+            discount_cents: 0,
+            total_cents: 0,
+            company_paid_cents: 0,
+            employee_debt_cents: 0,
+            created_at: now,
+            updated_at: now,
+            deleted_at: null,
+            cancelled_at: null,
+          },
+          dish
+        );
+
+        await trx('order_items').insert({
+          order_id: orderId,
+          dish_id: item.dishId,
+          qty: item.qty,
+          price_cents: priceCents,
+          line_total_cents: item.qty * priceCents,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+
       await recalculateOrderTotals(trx, orderId);
 
       return orderId;
     });
 
     const order = await requireOrder(inserted);
-    res.status(201).json(toOrderDto(order, []));
+    const createdItems = await loadOrderItems(inserted);
+    res.status(201).json(toOrderDto(order, createdItems));
   } catch (error) {
     next(error);
   }
@@ -395,11 +442,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const updateOrder = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
-
-    if (!orderId) {
-      throw new AppError('Order id is required', 400);
-    }
+    const orderId = parseRequiredId(req.params.id, 'Order id');
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
@@ -436,11 +479,7 @@ export const updateOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
-
-    if (!orderId) {
-      throw new AppError('Order id is required', 400);
-    }
+    const orderId = parseRequiredId(req.params.id, 'Order id');
 
     const order = await requireOrder(orderId);
     const currentUser = await requireOrderEditor(req, order);
@@ -476,11 +515,11 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
+    const orderId = parseRequiredId(req.params.id, 'Order id');
     const dishId = Number(req.body.dishId);
     const qty = Number(req.body.qty);
 
-    if (!orderId || !dishId || !qty || qty < 1) {
+    if (!dishId || !qty || qty < 1) {
       throw new AppError('order id, dishId, and qty >= 1 are required', 400);
     }
 
@@ -529,11 +568,11 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
 
 export const updateOrderDish = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
+    const orderId = parseRequiredId(req.params.id, 'Order id');
     const dishId = Number(req.body.dishId);
     const qty = Number(req.body.qty);
 
-    if (!orderId || !dishId || !qty || qty < 1) {
+    if (!dishId || !qty || qty < 1) {
       throw new AppError('order id, dishId, and qty >= 1 are required', 400);
     }
 
@@ -569,12 +608,8 @@ export const updateOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
 export const removeOrderDish = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
-    const dishId = Number(req.params.dishId);
-
-    if (!orderId || !dishId) {
-      throw new AppError('Order id and dish id are required', 400);
-    }
+    const orderId = parseRequiredId(req.params.id, 'Order id');
+    const dishId = parseRequiredId(req.params.dishId, 'Dish id');
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
@@ -598,10 +633,10 @@ export const removeOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
 export const patchOrderStatus = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const orderId = Number(req.params.id);
+    const orderId = parseRequiredId(req.params.id, 'Order id');
     const nextStatus = String(req.body.status || '') as OrderModel['status'];
 
-    if (!orderId || !nextStatus) {
+    if (!nextStatus) {
       throw new AppError('Order id and status are required', 400);
     }
 

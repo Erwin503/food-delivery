@@ -4,6 +4,9 @@ import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CategoryModel, CompanyModel, DishModel } from '../models';
 import { buildUploadedFileUrl } from '../middleware/uploadMiddleware';
+import { toIsoString } from '../utils/dateMapper';
+import { requireEntity } from '../utils/entityGuards';
+import { parseRequiredId } from '../utils/requestParams';
 
 type CategoryRow = CategoryModel;
 type DishRow = DishModel;
@@ -22,9 +25,6 @@ const dishColumns = [
   'updated_at',
   'deleted_at',
 ] as const;
-
-const toIsoString = (value: string | Date | undefined): string =>
-  new Date(value ?? new Date(0)).toISOString();
 
 type CompanySubscriptionRow = Pick<CompanyModel, 'id' | 'subscription_expires_at'>;
 
@@ -82,22 +82,11 @@ const loadDishById = async (id: number): Promise<DishRow | undefined> =>
     .whereNull('deleted_at')
     .first();
 
-const requireCategory = async (id: number): Promise<CategoryRow> => {
-  const category = await loadCategoryById(id);
-
-  if (!category) {
-    throw new AppError('Category not found', 404);
-  }
-
-  return category;
-};
+const requireCategory = async (id: number): Promise<CategoryRow> =>
+  requireEntity(() => loadCategoryById(id), 'Category not found');
 
 const requireDish = async (id: number): Promise<DishRow> => {
-  const dish = await loadDishById(id);
-
-  if (!dish) {
-    throw new AppError('Dish not found', 404);
-  }
+  const dish = await requireEntity(() => loadDishById(id), 'Dish not found');
 
   await requireCategory(dish.category_id);
 
@@ -125,11 +114,7 @@ export const getCategories = async (_req: Request, res: Response, next: NextFunc
 
 export const getCategoryById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const categoryId = Number(req.params.id);
-
-    if (!categoryId) {
-      throw new AppError('Category id is required', 400);
-    }
+    const categoryId = parseRequiredId(req.params.id, 'Category id');
 
     const category = await requireCategory(categoryId);
     res.json(toCategoryDto(category));
@@ -174,11 +159,7 @@ export const createCategory = async (req: Request, res: Response, next: NextFunc
 
 export const updateCategory = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const categoryId = Number(req.params.id);
-
-    if (!categoryId) {
-      throw new AppError('Category id is required', 400);
-    }
+    const categoryId = parseRequiredId(req.params.id, 'Category id');
 
     await requireCategory(categoryId);
 
@@ -221,11 +202,7 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
 
 export const deleteCategory = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const categoryId = Number(req.params.id);
-
-    if (!categoryId) {
-      throw new AppError('Category id is required', 400);
-    }
+    const categoryId = parseRequiredId(req.params.id, 'Category id');
 
     await requireCategory(categoryId);
 
@@ -301,11 +278,7 @@ export const getDishes = async (req: AuthRequest, res: Response, next: NextFunct
 
 export const getDishById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const dishId = Number(req.params.id);
-
-    if (!dishId) {
-      throw new AppError('Dish id is required', 400);
-    }
+    const dishId = parseRequiredId(req.params.id, 'Dish id');
 
     const company = await loadCompanyForUser(req.user?.companyId);
     const dish = await requireDish(dishId);
@@ -317,11 +290,7 @@ export const getDishById = async (req: AuthRequest, res: Response, next: NextFun
 
 export const getDishesByCategory = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const categoryId = Number(req.params.id);
-
-    if (!categoryId) {
-      throw new AppError('Category id is required', 400);
-    }
+    const categoryId = parseRequiredId(req.params.id, 'Category id');
 
     await requireCategory(categoryId);
 
@@ -388,11 +357,7 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
 
 export const updateDish = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const dishId = Number(req.params.id);
-
-    if (!dishId) {
-      throw new AppError('Dish id is required', 400);
-    }
+    const dishId = parseRequiredId(req.params.id, 'Dish id');
 
     const currentDish = await requireDish(dishId);
     const patch: Record<string, unknown> = {
@@ -476,11 +441,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
 
 export const deleteDish = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const dishId = Number(req.params.id);
-
-    if (!dishId) {
-      throw new AppError('Dish id is required', 400);
-    }
+    const dishId = parseRequiredId(req.params.id, 'Dish id');
 
     await requireDish(dishId);
 

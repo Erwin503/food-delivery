@@ -32,8 +32,7 @@ export interface OrderDto {
 }
 
 export interface CreateOrderDto {
-  deliveryFeeCents?: number;
-  discountCents?: number;
+  items: UpsertOrderDishDto[];
 }
 
 export interface UpdateOrderDto {

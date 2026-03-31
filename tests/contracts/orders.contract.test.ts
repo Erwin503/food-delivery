@@ -60,7 +60,7 @@ test('GET /api/orders/:id returns order details with items for owner, manager, o
   }
 });
 
-test('POST /api/orders creates a draft order for employee role', async () => {
+test('POST /api/orders creates a draft order from dishes for employee role', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -71,8 +71,10 @@ test('POST /api/orders creates a draft order for employee role', async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        deliveryFeeCents: 1000,
-        discountCents: 200,
+        items: [
+          { dishId: 1, qty: 1 },
+          { dishId: 4, qty: 2 },
+        ],
       }),
     });
 
@@ -81,13 +83,15 @@ test('POST /api/orders creates a draft order for employee role', async () => {
     assert.equal(payload.status, 'created');
     assert.equal(payload.companyId, 1);
     assert.equal(payload.routeId, 2);
-    assert.equal(payload.totalCents, 800);
+    assert.equal(payload.subtotalCents, 79700);
+    assert.equal(payload.totalCents, 79700);
+    assert.equal(payload.items.length, 2);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/orders creates a draft order for manager role in the same company', async () => {
+test('POST /api/orders creates a draft order from dishes for manager role in the same company', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -98,7 +102,7 @@ test('POST /api/orders creates a draft order for manager role in the same compan
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        deliveryFeeCents: 500,
+        items: [{ dishId: 2, qty: 1 }],
       }),
     });
 
@@ -107,6 +111,8 @@ test('POST /api/orders creates a draft order for manager role in the same compan
     assert.equal(payload.companyId, 1);
     assert.equal(payload.userId, 2);
     assert.equal(payload.routeId, 2);
+    assert.equal(payload.totalCents, 67400);
+    assert.equal(payload.items.length, 1);
   } finally {
     await stopTestServer(server);
   }
@@ -315,10 +321,10 @@ test('PATCH /api/orders/:id/status adds debt only for the part above user limit'
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.companyPaidCents, 100000);
-    assert.equal(payload.employeeDebtCents, 49600);
+    assert.equal(payload.employeeDebtCents, 49700);
 
     const user = await db('users').where({ id: 4 }).first();
-    assert.equal(user.debt_cents, 49600);
+    assert.equal(user.debt_cents, 49700);
   } finally {
     await stopTestServer(server);
   }
@@ -344,7 +350,7 @@ test('PATCH /api/orders/:id/status does not add debt when order fits into limit'
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.companyPaidCents, 149600);
+    assert.equal(payload.companyPaidCents, 149700);
     assert.equal(payload.employeeDebtCents, 0);
 
     const user = await db('users').where({ id: 4 }).first();
@@ -368,7 +374,9 @@ test('POST /api/orders rejects creation after route cutoff time', async () => {
         Authorization: `Bearer ${employeeToken()}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        items: [{ dishId: 1, qty: 1 }],
+      }),
     });
 
     assert.equal(response.status, 409);

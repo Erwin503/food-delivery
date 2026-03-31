@@ -3,6 +3,9 @@ import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CompanyModel, RouteModel, UserModel } from '../models';
+import { toNullableIsoString } from '../utils/dateMapper';
+import { requireEntity } from '../utils/entityGuards';
+import { parseRequiredId } from '../utils/requestParams';
 import { requireAuthenticatedUser } from '../utils/userQueries';
 
 const routeColumns = [
@@ -17,9 +20,6 @@ const routeColumns = [
 ] as const;
 
 const companyColumns = ['id', 'name'] as const;
-
-const toIsoString = (value: string | Date | undefined | null): string | null =>
-  value ? new Date(value).toISOString() : null;
 
 const toSqlDateTime = (value: string | Date): string => {
   const date = new Date(value);
@@ -40,8 +40,8 @@ const toRouteDto = (
   departureAt: new Date(route.departure_at).toISOString(),
   orderAcceptanceEndsAt: new Date(route.order_acceptance_ends_at).toISOString(),
   description: route.description,
-  createdAt: toIsoString(route.created_at),
-  updatedAt: toIsoString(route.updated_at),
+  createdAt: toNullableIsoString(route.created_at),
+  updatedAt: toNullableIsoString(route.updated_at),
   companies: companies?.map((company) => ({
     id: company.id,
     name: company.name,
@@ -61,19 +61,16 @@ const validateRouteTimes = (departureAt: string, orderAcceptanceEndsAt: string) 
   }
 };
 
-const requireRoute = async (id: number): Promise<RouteModel> => {
-  const route = await db<RouteModel>('routes')
-    .select(...routeColumns)
-    .where({ id })
-    .whereNull('deleted_at')
-    .first();
-
-  if (!route) {
-    throw new AppError('Route not found', 404);
-  }
-
-  return route;
-};
+const requireRoute = async (id: number): Promise<RouteModel> =>
+  requireEntity(
+    () =>
+      db<RouteModel>('routes')
+        .select(...routeColumns)
+        .where({ id })
+        .whereNull('deleted_at')
+        .first(),
+    'Route not found'
+  );
 
 const loadRouteCompanies = async (routeId: number): Promise<Array<Pick<CompanyModel, 'id' | 'name'>>> =>
   db<CompanyModel>('companies as c')
@@ -110,11 +107,7 @@ export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunct
 export const getRouteById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
-
-    if (!routeId) {
-      throw new AppError('Route id is required', 400);
-    }
+    const routeId = parseRequiredId(req.params.id, 'Route id');
 
     const route = await requireRoute(routeId);
     const companies = await loadRouteCompanies(routeId);
@@ -173,11 +166,7 @@ export const createRoute = async (req: AuthRequest, res: Response, next: NextFun
 export const updateRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
-
-    if (!routeId) {
-      throw new AppError('Route id is required', 400);
-    }
+    const routeId = parseRequiredId(req.params.id, 'Route id');
 
     await requireRoute(routeId);
 
@@ -238,11 +227,7 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
 export const deleteRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
-
-    if (!routeId) {
-      throw new AppError('Route id is required', 400);
-    }
+    const routeId = parseRequiredId(req.params.id, 'Route id');
 
     await requireRoute(routeId);
 
@@ -260,11 +245,7 @@ export const deleteRoute = async (req: AuthRequest, res: Response, next: NextFun
 export const getRouteCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
-
-    if (!routeId) {
-      throw new AppError('Route id is required', 400);
-    }
+    const routeId = parseRequiredId(req.params.id, 'Route id');
 
     await requireRoute(routeId);
     const companies = await loadRouteCompanies(routeId);
@@ -277,10 +258,10 @@ export const getRouteCompanies = async (req: AuthRequest, res: Response, next: N
 export const assignRouteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
+    const routeId = parseRequiredId(req.params.id, 'Route id');
     const companyId = Number(req.body.companyId);
 
-    if (!routeId || !companyId) {
+    if (!companyId) {
       throw new AppError('Route id and companyId are required', 400);
     }
 
@@ -315,12 +296,8 @@ export const assignRouteCompany = async (req: AuthRequest, res: Response, next: 
 export const removeRouteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const routeId = Number(req.params.id);
-    const companyId = Number(req.params.companyId);
-
-    if (!routeId || !companyId) {
-      throw new AppError('Route id and company id are required', 400);
-    }
+    const routeId = parseRequiredId(req.params.id, 'Route id');
+    const companyId = parseRequiredId(req.params.companyId, 'Company id');
 
     await requireRoute(routeId);
     await db('route_companies').where({ route_id: routeId, company_id: companyId }).delete();
