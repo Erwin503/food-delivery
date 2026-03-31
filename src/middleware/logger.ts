@@ -1,20 +1,20 @@
-import { Request, Response, NextFunction } from 'express';
-import logger from '../utils/logger'; // Подключаем файл логгера
+import { NextFunction, Request, Response } from 'express';
+import logger from '../utils/logger';
 
-// Middleware для логирования запросов
-export const logRequests = (req: Request, res: Response, next: any) => {
-  const start = Date.now(); // Начало времени запроса
+export const logRequests = (req: Request, res: Response, next: NextFunction) => {
+  const startedAt = Date.now();
 
-  // Логируем начало запроса
-  logger.info(`Начало запроса: ${req.method} ${req.url}`);
-
-  // По завершении запроса логируем его результат
   res.on('finish', () => {
-    const duration = Date.now() - start;
-    logger.info(
-      `Завершение запроса: ${req.method} ${req.url} - Статус: ${res.statusCode} - Время выполнения: ${duration}ms`
-    );
+    const durationMs = Date.now() - startedAt;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+
+    logger.log(level, 'HTTP request completed', {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs,
+    });
   });
 
-  next(); // Передаем запрос дальше
+  next();
 };

@@ -1,37 +1,32 @@
 import { createLogger, format, transports } from 'winston';
 
-const { combine, timestamp, printf, errors } = format;
+const { combine, timestamp, printf, errors, splat, metadata, colorize, json } = format;
 
-// Определяем формат вывода логов
-const logFormat = printf(({ level, message, timestamp, stack }) => {
-  return `${timestamp} [${level}]: ${stack || message}`;
+const isProduction = process.env.NODE_ENV === 'production';
+const configuredLevel = process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug');
+
+const consoleFormat = printf(({ level, message, timestamp, stack, metadata: extra }) => {
+  const serializedMetadata =
+    extra && Object.keys(extra).length > 0 ? ` ${JSON.stringify(extra)}` : '';
+
+  return `${timestamp} [${level}]: ${stack || message}${serializedMetadata}`;
 });
 
-// Создаем логгер
 const logger = createLogger({
-  level: 'debug',
+  level: configuredLevel,
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     errors({ stack: true }),
-    logFormat
+    splat(),
+    metadata({ fillExcept: ['message', 'level', 'timestamp', 'label'] })
   ),
   transports: [
     new transports.Console({
-      format: combine(
-        format.colorize(), // Цветовая разметка только для консоли
-        logFormat
-      ),
-    }),
-    new transports.File({
-      filename: 'logs/error.log',
-      level: 'error',
-      format: logFormat, // Отключаем цветовую разметку для файлов
-    }),
-    new transports.File({
-      filename: 'logs/combined.log',
-      format: logFormat, // Отключаем цветовую разметку для файлов
+      format: isProduction ? combine(json()) : combine(colorize(), consoleFormat),
     }),
   ],
 });
+
+export const isDebugLoggingEnabled = (): boolean => logger.isLevelEnabled('debug');
 
 export default logger;

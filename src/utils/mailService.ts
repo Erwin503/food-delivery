@@ -1,39 +1,57 @@
-import nodemailer from "nodemailer";
-import logger from "./logger";
-import knex from "../db/knex";
-import { generateSessionQrCode } from "./qrService";
+import nodemailer from 'nodemailer';
+import knex from '../db/knex';
+import logger from './logger';
+import { generateSessionQrCode } from './qrService';
+
+const smtpPort = Number(process.env.SMTP_PORT) || 2525;
+const smtpSecure =
+  process.env.SMTP_SECURE != null ? process.env.SMTP_SECURE === 'true' : smtpPort === 465;
 
 export const mailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "sandbox.smtp.mailtrap.io",
-  port: Number(process.env.SMTP_PORT) || 2525,
+  host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
+  port: smtpPort,
+  secure: smtpSecure,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
+export const isMailConfigured = (): boolean => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+
 export const sendEmail = async (
   to: string,
   subject: string,
   html: string,
-  fromName = "Система уведомлений"
+  fromName = 'Система уведомлений'
 ) => {
-  try {
-    const from = `"${fromName}" <${process.env.SMTP_USER}>`;
+  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
 
-    await mailTransporter.sendMail({
-      from,
-      to,
-      subject,
-      html,
-    });
+  await mailTransporter.sendMail({
+    from,
+    to,
+    subject,
+    html,
+  });
 
-    logger.info(`Письмо отправлено на ${to}`);
-    return true;
-  } catch (error) {
-    logger.error("Ошибка при отправке письма", { error });
-    throw error;
+  logger.info('Email sent', { to, subject });
+  return true;
+};
+
+export const queueEmail = (to: string, subject: string, html: string, fromName?: string): void => {
+  if (!isMailConfigured()) {
+    return;
   }
+
+  setImmediate(() => {
+    sendEmail(to, subject, html, fromName).catch((error) => {
+      logger.error('Email delivery failed', {
+        to,
+        subject,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
 };
 
 export const generateSessionEmailHtml = (
@@ -59,7 +77,7 @@ export const generateSessionEmailHtml = (
           </tr>
           <tr>
             <td style="padding: 8px; font-weight: bold;">Время:</td>
-            <td style="padding: 8px;">${startTime} – ${endTime}</td>
+            <td style="padding: 8px;">${startTime} - ${endTime}</td>
           </tr>
           <tr>
             <td style="padding: 8px; font-weight: bold;">Место:</td>
@@ -71,7 +89,7 @@ export const generateSessionEmailHtml = (
           qrCodeBase64
             ? `<p style="margin-top: 24px;">Предъявите этот QR-код при визите:</p>
                <img src="${qrCodeBase64}" alt="QR Code" style="max-width: 200px; border: 1px solid #ddd; padding: 8px;" />`
-            : ""
+            : ''
         }
 
         <p style="margin-top: 24px;">Если у вас возникнут вопросы, свяжитесь с нашим администратором.</p>
@@ -86,20 +104,20 @@ export const buildSessionEmailContent = async (
   sessionId: number,
   userName: string
 ): Promise<{ subject: string; html: string }> => {
-  const session = await knex("Sessions")
-    .join("WorkingHours", "Sessions.working_hour_id", "WorkingHours.id")
-    .join("Districts", "Sessions.district_id", "Districts.id")
+  const session = await knex('Sessions')
+    .join('WorkingHours', 'Sessions.working_hour_id', 'WorkingHours.id')
+    .join('Districts', 'Sessions.district_id', 'Districts.id')
     .select(
-      "WorkingHours.specific_date",
-      "WorkingHours.start_time",
-      "WorkingHours.end_time",
-      "Districts.name as district_name"
+      'WorkingHours.specific_date',
+      'WorkingHours.start_time',
+      'WorkingHours.end_time',
+      'Districts.name as district_name'
     )
-    .where("Sessions.id", sessionId)
+    .where('Sessions.id', sessionId)
     .first();
 
   if (!session) {
-    throw new Error("Сессия не найдена");
+    throw new Error('Сессия не найдена');
   }
 
   const { qrCode } = await generateSessionQrCode(sessionId);
@@ -113,7 +131,7 @@ export const buildSessionEmailContent = async (
     qrCode
   );
 
-  const subject = `Подтверждение записи на приём — ${session.specific_date} ${session.start_time}`;
+  const subject = `Подтверждение записи на приём - ${session.specific_date} ${session.start_time}`;
 
   return { subject, html };
 };

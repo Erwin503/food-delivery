@@ -44,7 +44,6 @@ services:
       - "${PORT:-3000}:3000"
     command: >
       sh -c "npx knex migrate:latest &&
-             npx knex seed:run &&
              node dist/src/index.js"
 
 volumes:

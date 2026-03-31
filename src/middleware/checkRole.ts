@@ -1,17 +1,14 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './authMiddleware';
-import logger from '../utils/logger';
+import { AppError } from '../errors/AppError';
 
 export const checkRole = (allowedRoles: string[]) => {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
+  return (req: AuthRequest, _res: Response, next: NextFunction) => {
     if (req.user && allowedRoles.includes(req.user.role)) {
       next();
       return;
     }
 
-    logger.debug(
-      `User role: ${req.user?.role ?? 'anonymous'}, allowed roles: ${allowedRoles.join(', ')}`
-    );
-    res.status(403).json({ message: 'Forbidden' });
+    next(new AppError('Forbidden', 403, true, 'FORBIDDEN'));
   };
 };

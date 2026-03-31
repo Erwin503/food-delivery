@@ -7,6 +7,7 @@ import apiRoutes from './routes/index';
 import { logRequests } from './middleware/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
+import db from './db/knex';
 
 export const createApp = () => {
   dotenv.config();
@@ -24,6 +25,18 @@ export const createApp = () => {
   app.use(express.json());
   app.use(logRequests);
   app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+  app.get('/health', async (_req, res, next) => {
+    try {
+      await db.raw('SELECT 1');
+      res.json({
+        status: 'ok',
+        environment: process.env.NODE_ENV || 'development',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.use('/api', apiRoutes);
   app.use(errorHandler);

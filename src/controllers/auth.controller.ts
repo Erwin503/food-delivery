@@ -10,7 +10,7 @@ import {
 import { AuthRequest } from '../middleware/authMiddleware';
 import { generateLoginCode } from '../utils/auth';
 import { generateToken } from '../utils/generateToken';
-import { sendEmail } from '../utils/mailService';
+import { isMailConfigured, queueEmail } from '../utils/mailService';
 import { comparePassword, hashPassword } from '../utils/password';
 import { toUserDto } from '../utils/userMapper';
 import {
@@ -38,16 +38,12 @@ const issueAuthResponse = (res: Response, user: UserModel) => {
   });
 };
 
-const sendEmailIfConfigured = async (to: string, subject: string, html: string): Promise<void> => {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+const sendEmailIfConfigured = (to: string, subject: string, html: string): void => {
+  if (!isMailConfigured()) {
     return;
   }
 
-  try {
-    await sendEmail(to, subject, html);
-  } catch (_error) {
-    // Email delivery should not block auth flows in local development.
-  }
+  queueEmail(to, subject, html);
 };
 
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
@@ -95,7 +91,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       });
     });
 
-    await sendEmailIfConfigured(
+    sendEmailIfConfigured(
       email,
       'Verify your email',
       `<p>Your verification code is <strong>${verificationCode}</strong>.</p>`
@@ -178,7 +174,7 @@ export const loginStep1 = async (req: Request, res: Response, next: NextFunction
       created_at: createdAt,
     });
 
-    await sendEmailIfConfigured(
+    sendEmailIfConfigured(
       email,
       'Your login code',
       `<p>Your verification code is <strong>${code}</strong>.</p>`
@@ -387,7 +383,7 @@ export const requestPasswordReset = async (req: Request, res: Response, next: Ne
         created_at: createdAt,
       });
 
-      await sendEmailIfConfigured(
+      sendEmailIfConfigured(
         email,
         'Password reset code',
         `<p>Your password reset code is <strong>${code}</strong>.</p>`

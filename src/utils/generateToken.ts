@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import logger from '../utils/logger';
+import logger, { isDebugLoggingEnabled } from '../utils/logger';
 import { getJwtExpiresIn, getJwtSecret } from './auth';
 
 export const generateToken = (payload: object): string => {
@@ -7,7 +7,9 @@ export const generateToken = (payload: object): string => {
   const expiresIn = getJwtExpiresIn();
   const token = jwt.sign(payload, secret, { expiresIn });
 
-  logger.debug(`token: ${token}`);
+  if (isDebugLoggingEnabled()) {
+    logger.debug('JWT token generated');
+  }
 
   return token;
 };
