@@ -24,15 +24,27 @@ const router = Router();
  *       type: object
  *       required:
  *         - dishId
+ *         - categoryId
  *         - qty
  *         - priceCents
+ *         - basePriceCents
+ *         - discountPriceCents
+ *         - discountedQty
  *         - lineTotalCents
  *       properties:
  *         dishId:
  *           type: integer
+ *         categoryId:
+ *           type: integer
  *         qty:
  *           type: integer
  *         priceCents:
+ *           type: integer
+ *         basePriceCents:
+ *           type: integer
+ *         discountPriceCents:
+ *           type: integer
+ *         discountedQty:
  *           type: integer
  *         lineTotalCents:
  *           type: integer

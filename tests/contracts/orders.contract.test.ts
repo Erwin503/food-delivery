@@ -83,8 +83,8 @@ test('POST /api/orders creates a draft order from dishes for employee role', asy
     assert.equal(payload.status, 'created');
     assert.equal(payload.companyId, 1);
     assert.equal(payload.routeId, 2);
-    assert.equal(payload.subtotalCents, 79700);
-    assert.equal(payload.totalCents, 79700);
+    assert.equal(payload.subtotalCents, 81700);
+    assert.equal(payload.totalCents, 81700);
     assert.equal(payload.items.length, 2);
   } finally {
     await stopTestServer(server);
@@ -111,14 +111,52 @@ test('POST /api/orders/calculate returns total by items without creating an orde
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.subtotalCents, 79700);
-    assert.equal(payload.totalCents, 79700);
-    assert.equal(payload.companyPaidCents, 79700);
-    assert.equal(payload.employeeDebtCents, 0);
+    assert.equal(payload.subtotalCents, 81700);
+    assert.equal(payload.totalCents, 81700);
+    assert.equal(payload.companyPaidCents, 100);
+    assert.equal(payload.employeeDebtCents, 81600);
     assert.equal(payload.items.length, 2);
 
     const ordersCount = await db('orders').count<{ count: number }>('id as count').first();
     assert.equal(Number(ordersCount?.count ?? 0), 3);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/orders/calculate applies subscription discount to only one dish per category', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/calculate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [
+          { dishId: 1, qty: 1 },
+          { dishId: 2, qty: 1 },
+          { dishId: 4, qty: 2 },
+        ],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+
+    const margherita = payload.items.find((item: { dishId: number }) => item.dishId === 1);
+    const pepperoni = payload.items.find((item: { dishId: number }) => item.dishId === 2);
+    const drink = payload.items.find((item: { dishId: number }) => item.dishId === 4);
+
+    assert.equal(payload.subtotalCents, 156600);
+    assert.equal(margherita.discountedQty, 1);
+    assert.equal(margherita.lineTotalCents, 53900);
+    assert.equal(pepperoni.discountedQty, 0);
+    assert.equal(pepperoni.lineTotalCents, 74900);
+    assert.equal(drink.discountedQty, 1);
+    assert.equal(drink.lineTotalCents, 27800);
   } finally {
     await stopTestServer(server);
   }
@@ -255,6 +293,8 @@ test('POST /api/orders/:id/dishes adds an item and snapshots current dish price'
     const addedItem = payload.items.find((item: { dishId: number }) => item.dishId === 4);
     assert.ok(addedItem);
     assert.equal(addedItem.priceCents, 12900);
+    assert.equal(addedItem.discountedQty, 1);
+    assert.equal(addedItem.lineTotalCents, 27800);
   } finally {
     await stopTestServer(server);
   }
@@ -277,7 +317,8 @@ test('PUT /api/orders/:id/dishes changes item quantity for owner or manager', as
     const payload = await response.json();
     const updatedItem = payload.items.find((item: { dishId: number }) => item.dishId === 1);
     assert.equal(updatedItem.qty, 3);
-    assert.equal(updatedItem.lineTotalCents, 179700);
+    assert.equal(updatedItem.discountedQty, 1);
+    assert.equal(updatedItem.lineTotalCents, 173700);
   } finally {
     await stopTestServer(server);
   }
@@ -354,10 +395,10 @@ test('PATCH /api/orders/:id/status adds debt only for the part above user limit'
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.companyPaidCents, 100000);
-    assert.equal(payload.employeeDebtCents, 49700);
+    assert.equal(payload.employeeDebtCents, 43700);
 
     const user = await db('users').where({ id: 4 }).first();
-    assert.equal(user.debt_cents, 49700);
+    assert.equal(user.debt_cents, 43700);
   } finally {
     await stopTestServer(server);
   }
@@ -383,11 +424,44 @@ test('PATCH /api/orders/:id/status does not add debt when order fits into limit'
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.companyPaidCents, 149700);
+    assert.equal(payload.companyPaidCents, 143700);
     assert.equal(payload.employeeDebtCents, 0);
 
     const user = await db('users').where({ id: 4 }).first();
     assert.equal(user.debt_cents, 0);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/orders rejects creating a second order on the same day for the same user', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const firstResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [{ dishId: 1, qty: 1 }],
+      }),
+    });
+
+    const secondResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [{ dishId: 4, qty: 1 }],
+      }),
+    });
+
+    assert.equal(firstResponse.status, 201);
+    assert.equal(secondResponse.status, 409);
   } finally {
     await stopTestServer(server);
   }

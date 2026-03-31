@@ -99,17 +99,17 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('orders').insert([
-    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 134700, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 149600, company_paid_cents: 100000, employee_debt_cents: 49600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 128800, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 143700, company_paid_cents: 100, employee_debt_cents: 143600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
     { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, company_paid_cents: 80000, employee_debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
     { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, company_paid_cents: 58800, employee_debt_cents: 0, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
   ]);
 
   await knex('order_items').insert([
-    { order_id: 1, dish_id: 1, qty: 1, price_cents: 59900, line_total_cents: 59900, created_at: now, updated_at: now },
-    { order_id: 1, dish_id: 2, qty: 1, price_cents: 74900, line_total_cents: 74900, created_at: now, updated_at: now },
-    { order_id: 2, dish_id: 2, qty: 1, price_cents: 74900, line_total_cents: 74900, created_at: now, updated_at: now },
-    { order_id: 2, dish_id: 4, qty: 3, price_cents: 14900, line_total_cents: 44700, created_at: now, updated_at: now },
-    { order_id: 3, dish_id: 3, qty: 1, price_cents: 48900, line_total_cents: 48900, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 08:00:00' },
+    { order_id: 1, dish_id: 1, category_id: 1, qty: 1, price_cents: 53900, base_price_cents: 59900, discount_price_cents: 53900, discounted_qty: 1, line_total_cents: 53900, created_at: now, updated_at: now },
+    { order_id: 1, dish_id: 2, category_id: 1, qty: 1, price_cents: 74900, base_price_cents: 74900, discount_price_cents: 67400, discounted_qty: 0, line_total_cents: 74900, created_at: now, updated_at: now },
+    { order_id: 2, dish_id: 2, category_id: 1, qty: 1, price_cents: 74900, base_price_cents: 74900, discount_price_cents: 67400, discounted_qty: 0, line_total_cents: 74900, created_at: now, updated_at: now },
+    { order_id: 2, dish_id: 4, category_id: 3, qty: 3, price_cents: 14900, base_price_cents: 14900, discount_price_cents: 12900, discounted_qty: 0, line_total_cents: 44700, created_at: now, updated_at: now },
+    { order_id: 3, dish_id: 3, category_id: 2, qty: 1, price_cents: 48900, base_price_cents: 48900, discount_price_cents: 43900, discounted_qty: 0, line_total_cents: 48900, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 08:00:00' },
   ]);
 
   await knex('order_status_history').insert([

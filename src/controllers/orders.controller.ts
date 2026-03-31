@@ -68,6 +68,25 @@ const routeColumns = [
 const hasActiveSubscription = (company?: Pick<CompanyModel, 'subscription_expires_at'> | null): boolean =>
   Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
 
+type RequestedOrderItem = {
+  dishId: number;
+  qty: number;
+};
+
+type OrderPricingSource = {
+  dishId: number;
+  categoryId: number;
+  qty: number;
+  basePriceCents: number;
+  discountPriceCents: number;
+};
+
+type PricedOrderItem = OrderPricingSource & {
+  discountedQty: number;
+  priceCents: number;
+  lineTotalCents: number;
+};
+
 const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   id: order.id,
   orderNumber: order.order_number,
@@ -85,8 +104,12 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   updatedAt: toNullableIsoString(order.updated_at),
   items: items?.map((item) => ({
     dishId: item.dish_id,
+    categoryId: item.category_id,
     qty: item.qty,
     priceCents: item.price_cents,
+    basePriceCents: item.base_price_cents,
+    discountPriceCents: item.discount_price_cents,
+    discountedQty: item.discounted_qty,
     lineTotalCents: item.line_total_cents,
   })),
 });
@@ -104,7 +127,19 @@ const loadOrderById = async (id: number): Promise<OrderModel | undefined> =>
 
 const loadOrderItems = async (orderId: number): Promise<OrderItemModel[]> =>
   db<OrderItemModel>('order_items')
-    .select('order_id', 'dish_id', 'qty', 'price_cents', 'line_total_cents', 'created_at', 'updated_at')
+    .select(
+      'order_id',
+      'dish_id',
+      'category_id',
+      'qty',
+      'price_cents',
+      'base_price_cents',
+      'discount_price_cents',
+      'discounted_qty',
+      'line_total_cents',
+      'created_at',
+      'updated_at'
+    )
     .where({ order_id: orderId })
     .orderBy('dish_id', 'asc');
 
@@ -158,6 +193,120 @@ const getAvailableRouteForCompany = async (
     .orderBy('r.departure_at', 'asc')
     .first();
 
+const getTodayBounds = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  return { start, end };
+};
+
+const normalizeRequestedItems = (items: RequestedOrderItem[]): RequestedOrderItem[] => {
+  const aggregated = new Map<number, number>();
+
+  for (const item of items) {
+    aggregated.set(item.dishId, (aggregated.get(item.dishId) ?? 0) + item.qty);
+  }
+
+  return Array.from(aggregated.entries())
+    .map(([dishId, qty]) => ({ dishId, qty }))
+    .sort((left, right) => left.dishId - right.dishId);
+};
+
+const buildPricedOrderItems = (
+  items: OrderPricingSource[],
+  hasSubscription: boolean
+): PricedOrderItem[] => {
+  const pricedItems: PricedOrderItem[] = items.map((item) => ({
+    ...item,
+    discountedQty: 0,
+    priceCents: item.basePriceCents,
+    lineTotalCents: item.qty * item.basePriceCents,
+  }));
+
+  if (!hasSubscription) {
+    return pricedItems;
+  }
+
+  const cheapestItemByCategory = new Map<number, PricedOrderItem>();
+
+  for (const item of pricedItems) {
+    if (item.qty < 1) {
+      continue;
+    }
+
+    const current = cheapestItemByCategory.get(item.categoryId);
+
+    if (
+      !current ||
+      item.discountPriceCents < current.discountPriceCents ||
+      (item.discountPriceCents === current.discountPriceCents && item.basePriceCents < current.basePriceCents) ||
+      (item.discountPriceCents === current.discountPriceCents &&
+        item.basePriceCents === current.basePriceCents &&
+        item.dishId < current.dishId)
+    ) {
+      cheapestItemByCategory.set(item.categoryId, item);
+    }
+  }
+
+  for (const item of pricedItems) {
+    const discountedQty = cheapestItemByCategory.get(item.categoryId)?.dishId === item.dishId ? 1 : 0;
+    const fullPriceQty = item.qty - discountedQty;
+
+    item.discountedQty = discountedQty;
+    item.priceCents = discountedQty > 0 ? item.discountPriceCents : item.basePriceCents;
+    item.lineTotalCents = item.basePriceCents * fullPriceQty + item.discountPriceCents * discountedQty;
+  }
+
+  return pricedItems;
+};
+
+const loadPricingSourcesForRequestedItems = async (
+  items: RequestedOrderItem[]
+): Promise<OrderPricingSource[]> => {
+  const normalizedItems = normalizeRequestedItems(items);
+  const dishesById = new Map<number, DishModel>();
+
+  for (const item of normalizedItems) {
+    const dish = await requireDish(item.dishId);
+    dishesById.set(item.dishId, dish);
+  }
+
+  return normalizedItems.map((item) => {
+    const dish = dishesById.get(item.dishId);
+
+    if (!dish) {
+      throw new AppError('Dish not found', 404);
+    }
+
+    return {
+      dishId: item.dishId,
+      categoryId: dish.category_id,
+      qty: item.qty,
+      basePriceCents: dish.base_price_cents,
+      discountPriceCents: dish.discount_price_cents,
+    };
+  });
+};
+
+const ensureUserCanCreateOnlyOneOrderPerDay = async (userId: number): Promise<void> => {
+  const { start, end } = getTodayBounds();
+  const existingOrder = await db<OrderModel>('orders')
+    .select('id')
+    .where({ user_id: userId })
+    .whereNull('deleted_at')
+    .whereNot('status', 'cancelled')
+    .andWhere('created_at', '>=', start)
+    .andWhere('created_at', '<', end)
+    .first();
+
+  if (existingOrder) {
+    throw new AppError('User can create only one order per day', 409);
+  }
+};
+
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
 
@@ -208,11 +357,6 @@ const ensureOrderIsEditable = async (order: OrderModel) => {
   }
 };
 
-const getOrderDishPrice = async (order: OrderModel, dish: DishModel): Promise<number> => {
-  const company = await loadCompany(order.company_id);
-  return hasActiveSubscription(company) ? dish.discount_price_cents : dish.base_price_cents;
-};
-
 const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<void> => {
   const order = await trx<OrderModel>('orders').select(...orderColumns).where({ id: orderId }).first();
 
@@ -230,12 +374,57 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
     throw new AppError('User not found', 404);
   }
 
-  const sumRow = await trx<OrderItemModel>('order_items')
-    .where({ order_id: orderId })
-    .sum<{ subtotal: number | null }>('line_total_cents as subtotal')
+  const company = await trx<CompanyModel>('companies')
+    .select('id', 'subscription_expires_at')
+    .where({ id: order.company_id })
+    .whereNull('deleted_at')
     .first();
 
-  const subtotalCents = Number(sumRow?.subtotal ?? 0);
+  if (!company) {
+    throw new AppError('Company not found', 404);
+  }
+
+  const items = await trx<OrderItemModel>('order_items')
+    .select(
+      'order_id',
+      'dish_id',
+      'category_id',
+      'qty',
+      'price_cents',
+      'base_price_cents',
+      'discount_price_cents',
+      'discounted_qty',
+      'line_total_cents',
+      'created_at',
+      'updated_at'
+    )
+    .where({ order_id: orderId })
+    .orderBy('dish_id', 'asc');
+
+  const repricedItems = buildPricedOrderItems(
+    items.map((item) => ({
+      dishId: item.dish_id,
+      categoryId: item.category_id,
+      qty: item.qty,
+      basePriceCents: item.base_price_cents,
+      discountPriceCents: item.discount_price_cents,
+    })),
+    hasActiveSubscription(company)
+  );
+
+  const now = new Date();
+  for (const item of repricedItems) {
+    await trx('order_items')
+      .where({ order_id: orderId, dish_id: item.dishId })
+      .update({
+        price_cents: item.priceCents,
+        discounted_qty: item.discountedQty,
+        line_total_cents: item.lineTotalCents,
+        updated_at: now,
+      });
+  }
+
+  const subtotalCents = repricedItems.reduce((sum, item) => sum + item.lineTotalCents, 0);
   const totalCents = Math.max(subtotalCents + order.delivery_fee_cents - order.discount_cents, 0);
   const billing = calculateOrderBilling(totalCents, {
     orderLimitCents: user.order_limit_cents,
@@ -271,7 +460,7 @@ const getNextOrderNumber = async (): Promise<string> => {
   return `${prefix}-${nextNumber}`;
 };
 
-const parseCreateOrderItems = (payload: unknown): Array<{ dishId: number; qty: number }> => {
+const parseCreateOrderItems = (payload: unknown): RequestedOrderItem[] => {
   if (!Array.isArray(payload) || payload.length === 0) {
     throw new AppError('Order items are required', 400);
   }
@@ -290,7 +479,7 @@ const parseCreateOrderItems = (payload: unknown): Array<{ dishId: number; qty: n
 
 const calculateDraftOrderFromItems = async (
   companyId: number,
-  items: Array<{ dishId: number; qty: number }>,
+  items: RequestedOrderItem[],
   user: Pick<UserModel, 'order_limit_cents'>
 ) => {
   const company = await loadCompany(companyId);
@@ -299,27 +488,12 @@ const calculateDraftOrderFromItems = async (
     throw new AppError('Company not found', 404);
   }
 
-  const priceBySubscription = hasActiveSubscription(company);
-  const aggregatedItems: Array<{
-    dishId: number;
-    qty: number;
-    priceCents: number;
-    lineTotalCents: number;
-  }> = [];
+  const pricedItems = buildPricedOrderItems(
+    await loadPricingSourcesForRequestedItems(items),
+    hasActiveSubscription(company)
+  );
 
-  for (const item of items) {
-    const dish = await requireDish(item.dishId);
-    const priceCents = priceBySubscription ? dish.discount_price_cents : dish.base_price_cents;
-
-    aggregatedItems.push({
-      dishId: item.dishId,
-      qty: item.qty,
-      priceCents,
-      lineTotalCents: item.qty * priceCents,
-    });
-  }
-
-  const subtotalCents = aggregatedItems.reduce((sum, item) => sum + item.lineTotalCents, 0);
+  const subtotalCents = pricedItems.reduce((sum, item) => sum + item.lineTotalCents, 0);
   const totalCents = subtotalCents;
   const billing = calculateOrderBilling(totalCents, {
     orderLimitCents: user.order_limit_cents,
@@ -330,7 +504,7 @@ const calculateDraftOrderFromItems = async (
     totalCents,
     companyPaidCents: billing.companyPaidCents,
     employeeDebtCents: billing.employeeDebtCents,
-    items: aggregatedItems,
+    items: pricedItems,
   };
 };
 
@@ -393,6 +567,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       throw new AppError('User must belong to a company to create an order', 409);
     }
 
+    await ensureUserCanCreateOnlyOneOrderPerDay(currentUser.id);
+
     const companyId = currentUser.company_id;
     const company = await loadCompany(companyId);
 
@@ -408,6 +584,10 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
     const now = new Date();
     const orderNumber = await getNextOrderNumber();
+    const pricedItems = buildPricedOrderItems(
+      await loadPricingSourcesForRequestedItems(items),
+      hasActiveSubscription(company)
+    );
 
     const inserted = await db.transaction(async (trx) => {
       const result = await trx('orders').insert({
@@ -438,36 +618,17 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         created_at: now,
       });
 
-      for (const item of items) {
-        const dish = await requireDish(item.dishId);
-        const priceCents = await getOrderDishPrice(
-          {
-            id: orderId,
-            order_number: orderNumber,
-            user_id: currentUser.id,
-            company_id: companyId,
-            route_id: route.id,
-            status: 'created',
-            subtotal_cents: 0,
-            delivery_fee_cents: 0,
-            discount_cents: 0,
-            total_cents: 0,
-            company_paid_cents: 0,
-            employee_debt_cents: 0,
-            created_at: now,
-            updated_at: now,
-            deleted_at: null,
-            cancelled_at: null,
-          },
-          dish
-        );
-
+      for (const item of pricedItems) {
         await trx('order_items').insert({
           order_id: orderId,
           dish_id: item.dishId,
+          category_id: item.categoryId,
           qty: item.qty,
-          price_cents: priceCents,
-          line_total_cents: item.qty * priceCents,
+          price_cents: item.priceCents,
+          base_price_cents: item.basePriceCents,
+          discount_price_cents: item.discountPriceCents,
+          discounted_qty: item.discountedQty,
+          line_total_cents: item.lineTotalCents,
           created_at: now,
           updated_at: now,
         });
@@ -591,7 +752,6 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
     await ensureOrderIsEditable(order);
 
     const dish = await requireDish(dishId);
-    const priceCents = await getOrderDishPrice(order, dish);
     const now = new Date();
 
     await db.transaction(async (trx) => {
@@ -610,9 +770,13 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
         await trx('order_items').insert({
           order_id: orderId,
           dish_id: dishId,
+          category_id: dish.category_id,
           qty,
-          price_cents: priceCents,
-          line_total_cents: qty * priceCents,
+          price_cents: dish.base_price_cents,
+          base_price_cents: dish.base_price_cents,
+          discount_price_cents: dish.discount_price_cents,
+          discounted_qty: 0,
+          line_total_cents: qty * dish.base_price_cents,
           created_at: now,
           updated_at: now,
         });
@@ -654,7 +818,7 @@ export const updateOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
       await trx('order_items').where({ order_id: orderId, dish_id: dishId }).update({
         qty,
-        line_total_cents: qty * item.price_cents,
+        discounted_qty: 0,
         updated_at: new Date(),
       });
 

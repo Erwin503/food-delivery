@@ -8,8 +8,12 @@ export type OrderStatus =
 
 export interface OrderItemDto {
   dishId: number;
+  categoryId: number;
   qty: number;
   priceCents: number;
+  basePriceCents: number;
+  discountPriceCents: number;
+  discountedQty: number;
   lineTotalCents: number;
 }
 
