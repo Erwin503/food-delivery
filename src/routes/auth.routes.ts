@@ -62,7 +62,7 @@ const router = Router();
  *         avatarUrl:
  *           type: string
  *           nullable: true
- *           example: https://example.com/avatar.png
+ *           example: /uploads/avatars/1712345678901-avatar.png
  *         orderLimitCents:
  *           type: integer
  *           example: 150000
@@ -141,9 +141,6 @@ const router = Router();
  *         phone:
  *           type: string
  *           nullable: true
- *         avatar:
- *           type: string
- *           format: binary
  *     UpdateProfileMultipartRequest:
  *       type: object
  *       properties:
@@ -156,6 +153,7 @@ const router = Router();
  *         avatar:
  *           type: string
  *           format: binary
+ *           description: Image file in jpeg, png, webp, or gif format, up to 5 MB
  *     SetPasswordRequest:
  *       type: object
  *       required:
