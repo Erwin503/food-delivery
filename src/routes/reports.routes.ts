@@ -6,6 +6,7 @@ import {
   runTodayReportsTestRequest,
 } from '../controllers/reports.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { checkRole } from '../middleware/checkRole';
 
 const router = Router();
 
@@ -28,7 +29,7 @@ const router = Router();
  *       403:
  *         description: Доступно только администратору
  */
-router.get('/reports/orders/today.pdf', authenticateToken, downloadTodayOrdersReport);
+router.get('/reports/orders/today.pdf', authenticateToken, checkRole(['admin']), downloadTodayOrdersReport);
 
 /**
  * @swagger
@@ -49,7 +50,7 @@ router.get('/reports/orders/today.pdf', authenticateToken, downloadTodayOrdersRe
  *       403:
  *         description: Доступно только администратору
  */
-router.get('/reports/dishes/today.pdf', authenticateToken, downloadTodayDishesReport);
+router.get('/reports/dishes/today.pdf', authenticateToken, checkRole(['admin']), downloadTodayDishesReport);
 
 /**
  * @swagger
@@ -70,7 +71,7 @@ router.get('/reports/dishes/today.pdf', authenticateToken, downloadTodayDishesRe
  *       403:
  *         description: Доступно только администратору
  */
-router.get('/reports/labels/today.pdf', authenticateToken, downloadTodayLabelsReport);
+router.get('/reports/labels/today.pdf', authenticateToken, checkRole(['admin']), downloadTodayLabelsReport);
 
 /**
  * @swagger
@@ -91,6 +92,6 @@ router.get('/reports/labels/today.pdf', authenticateToken, downloadTodayLabelsRe
  *       403:
  *         description: Доступно только администратору
  */
-router.post('/reports/test-run/today', authenticateToken, runTodayReportsTestRequest);
+router.post('/reports/test-run/today', authenticateToken, checkRole(['admin']), runTodayReportsTestRequest);
 
 export default router;

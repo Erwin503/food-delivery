@@ -10,6 +10,7 @@ import {
   updateRoute,
 } from '../controllers/routes.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { checkRole } from '../middleware/checkRole';
 
 const router = Router();
 
@@ -142,7 +143,7 @@ const router = Router();
  *               items:
  *                 $ref: '#/components/schemas/Route'
  */
-router.get('/routes', authenticateToken, getRoutes);
+router.get('/routes', authenticateToken, checkRole(['admin']), getRoutes);
 
 /**
  * @swagger
@@ -166,7 +167,7 @@ router.get('/routes', authenticateToken, getRoutes);
  *             schema:
  *               $ref: '#/components/schemas/Route'
  */
-router.get('/routes/:id', authenticateToken, getRouteById);
+router.get('/routes/:id', authenticateToken, checkRole(['admin']), getRouteById);
 
 /**
  * @swagger
@@ -190,7 +191,7 @@ router.get('/routes/:id', authenticateToken, getRouteById);
  *             schema:
  *               $ref: '#/components/schemas/Route'
  */
-router.post('/routes', authenticateToken, createRoute);
+router.post('/routes', authenticateToken, checkRole(['admin']), createRoute);
 
 /**
  * @swagger
@@ -220,7 +221,7 @@ router.post('/routes', authenticateToken, createRoute);
  *             schema:
  *               $ref: '#/components/schemas/Route'
  */
-router.put('/routes/:id', authenticateToken, updateRoute);
+router.put('/routes/:id', authenticateToken, checkRole(['admin']), updateRoute);
 
 /**
  * @swagger
@@ -240,7 +241,7 @@ router.put('/routes/:id', authenticateToken, updateRoute);
  *       204:
  *         description: Route deleted
  */
-router.delete('/routes/:id', authenticateToken, deleteRoute);
+router.delete('/routes/:id', authenticateToken, checkRole(['admin']), deleteRoute);
 
 /**
  * @swagger
@@ -266,7 +267,7 @@ router.delete('/routes/:id', authenticateToken, deleteRoute);
  *               items:
  *                 $ref: '#/components/schemas/RouteCompany'
  */
-router.get('/routes/:id/companies', authenticateToken, getRouteCompanies);
+router.get('/routes/:id/companies', authenticateToken, checkRole(['admin']), getRouteCompanies);
 
 /**
  * @swagger
@@ -298,7 +299,7 @@ router.get('/routes/:id/companies', authenticateToken, getRouteCompanies);
  *               items:
  *                 $ref: '#/components/schemas/RouteCompany'
  */
-router.post('/routes/:id/companies', authenticateToken, assignRouteCompany);
+router.post('/routes/:id/companies', authenticateToken, checkRole(['admin']), assignRouteCompany);
 
 /**
  * @swagger
@@ -323,6 +324,6 @@ router.post('/routes/:id/companies', authenticateToken, assignRouteCompany);
  *       204:
  *         description: Company removed from route
  */
-router.delete('/routes/:id/companies/:companyId', authenticateToken, removeRouteCompany);
+router.delete('/routes/:id/companies/:companyId', authenticateToken, checkRole(['admin']), removeRouteCompany);
 
 export default router;

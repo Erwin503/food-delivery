@@ -17,6 +17,7 @@ import {
   updateCompany,
 } from '../controllers/companies.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { checkRole } from '../middleware/checkRole';
 
 const router = Router();
 
@@ -174,8 +175,8 @@ const router = Router();
  *             schema:
  *               $ref: '#/components/schemas/Company'
  */
-router.get('/companies', authenticateToken, getCompanies);
-router.post('/companies', authenticateToken, createCompany);
+router.get('/companies', authenticateToken, checkRole(['admin', 'manager']), getCompanies);
+router.post('/companies', authenticateToken, checkRole(['admin']), createCompany);
 
 /**
  * @swagger
@@ -201,7 +202,7 @@ router.post('/companies', authenticateToken, createCompany);
  *       401:
  *         description: Invalid or expired code
  */
-router.post('/companies/join', authenticateToken, joinCompanyByCode);
+router.post('/companies/join', authenticateToken, checkRole(['employee']), joinCompanyByCode);
 
 /**
  * @swagger
@@ -263,9 +264,9 @@ router.post('/companies/join', authenticateToken, joinCompanyByCode);
  *       204:
  *         description: Company archived
  */
-router.get('/companies/:id', authenticateToken, getCompanyById);
-router.put('/companies/:id', authenticateToken, updateCompany);
-router.delete('/companies/:id', authenticateToken, deleteCompany);
+router.get('/companies/:id', authenticateToken, checkRole(['admin', 'manager']), getCompanyById);
+router.put('/companies/:id', authenticateToken, checkRole(['admin', 'manager']), updateCompany);
+router.delete('/companies/:id', authenticateToken, checkRole(['admin']), deleteCompany);
 
 /**
  * @swagger
@@ -315,8 +316,8 @@ router.delete('/companies/:id', authenticateToken, deleteCompany);
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
-router.get('/companies/:id/users', authenticateToken, getCompanyUsers);
-router.post('/companies/:id/users', authenticateToken, assignCompanyUser);
+router.get('/companies/:id/users', authenticateToken, checkRole(['admin', 'manager']), getCompanyUsers);
+router.post('/companies/:id/users', authenticateToken, checkRole(['admin']), assignCompanyUser);
 
 /**
  * @swagger
@@ -351,7 +352,7 @@ router.post('/companies/:id/users', authenticateToken, assignCompanyUser);
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
-router.put('/companies/:id/users/:userId/limit', authenticateToken, setCompanyUserLimit);
+router.put('/companies/:id/users/:userId/limit', authenticateToken, checkRole(['admin', 'manager']), setCompanyUserLimit);
 
 /**
  * @swagger
@@ -386,7 +387,7 @@ router.put('/companies/:id/users/:userId/limit', authenticateToken, setCompanyUs
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
-router.post('/companies/:id/users/:userId/debt-payment', authenticateToken, acceptCompanyUserDebtPayment);
+router.post('/companies/:id/users/:userId/debt-payment', authenticateToken, checkRole(['admin']), acceptCompanyUserDebtPayment);
 
 /**
  * @swagger
@@ -411,7 +412,7 @@ router.post('/companies/:id/users/:userId/debt-payment', authenticateToken, acce
  *       204:
  *         description: User removed from company
  */
-router.delete('/companies/:id/users/:userId', authenticateToken, removeCompanyUser);
+router.delete('/companies/:id/users/:userId', authenticateToken, checkRole(['admin', 'manager']), removeCompanyUser);
 
 /**
  * @swagger
@@ -461,8 +462,8 @@ router.delete('/companies/:id/users/:userId', authenticateToken, removeCompanyUs
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
-router.get('/companies/:id/manager', authenticateToken, getCompanyManager);
-router.put('/companies/:id/manager', authenticateToken, setCompanyManager);
+router.get('/companies/:id/manager', authenticateToken, checkRole(['admin', 'manager']), getCompanyManager);
+router.put('/companies/:id/manager', authenticateToken, checkRole(['admin', 'manager']), setCompanyManager);
 
 /**
  * @swagger
@@ -486,7 +487,7 @@ router.put('/companies/:id/manager', authenticateToken, setCompanyManager);
  *             schema:
  *               $ref: '#/components/schemas/CompanySubscriptionResponse'
  */
-router.post('/companies/:id/subscription', authenticateToken, purchaseCompanySubscription);
+router.post('/companies/:id/subscription', authenticateToken, checkRole(['admin', 'manager']), purchaseCompanySubscription);
 
 /**
  * @swagger
@@ -510,6 +511,6 @@ router.post('/companies/:id/subscription', authenticateToken, purchaseCompanySub
  *             schema:
  *               $ref: '#/components/schemas/CompanyJoinCodeResponse'
  */
-router.post('/companies/:id/join-code', authenticateToken, createCompanyJoinCode);
+router.post('/companies/:id/join-code', authenticateToken, checkRole(['admin', 'manager']), createCompanyJoinCode);
 
 export default router;

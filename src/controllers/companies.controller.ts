@@ -4,6 +4,14 @@ import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CompanyJoinCodeModel, CompanyManagerModel, CompanyModel, UserModel } from '../models';
 import { generateLoginCode } from '../utils/auth';
+import { hasCompanyManagementAccess } from '../utils/companyAccess';
+import {
+  loadUserByEmail,
+  loadUserById,
+  requireAuthenticatedUser,
+  requireUserById,
+  USER_COLUMNS,
+} from '../utils/userQueries';
 import { toUserDto } from '../utils/userMapper';
 
 const COMPANY_JOIN_CODE_TTL_SECONDS = 900;
@@ -20,23 +28,6 @@ const companyColumns = [
   'updated_at',
   'deleted_at',
 ] as const;
-const userColumns = [
-  'id',
-  'email',
-  'role',
-  'company_id',
-  'password_hash',
-  'email_verified_at',
-  'full_name',
-  'phone',
-  'avatar_url',
-  'order_limit_cents',
-  'debt_cents',
-  'created_at',
-  'updated_at',
-  'deleted_at',
-] as const;
-
 const toIsoString = (value: string | Date | undefined): string =>
   new Date(value ?? new Date(0)).toISOString();
 
@@ -62,20 +53,6 @@ const loadCompanyById = async (id: number): Promise<CompanyModel | undefined> =>
     .whereNull('deleted_at')
     .first();
 
-const loadUserById = async (id: number): Promise<UserModel | undefined> =>
-  db<UserModel>('users')
-    .select(...userColumns)
-    .where({ id })
-    .whereNull('deleted_at')
-    .first();
-
-const loadUserByEmail = async (email: string): Promise<UserModel | undefined> =>
-  db<UserModel>('users')
-    .select(...userColumns)
-    .where({ email })
-    .whereNull('deleted_at')
-    .first();
-
 const requireCompany = async (id: number): Promise<CompanyModel> => {
   const company = await loadCompanyById(id);
 
@@ -86,32 +63,14 @@ const requireCompany = async (id: number): Promise<CompanyModel> => {
   return company;
 };
 
-const requireUserById = async (id: number): Promise<UserModel> => {
-  const user = await loadUserById(id);
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  return user;
-};
-
 const requireCurrentUser = async (req: AuthRequest): Promise<UserModel> => {
-  if (!req.user?.id) {
-    throw new AppError('Unauthorized', 401);
-  }
-
-  return requireUserById(req.user.id);
+  return requireAuthenticatedUser(req.user);
 };
 
 const requireCompanyVisibility = async (req: AuthRequest, companyId: number): Promise<CompanyModel> => {
   const company = await requireCompany(companyId);
 
-  if (req.user?.role === 'admin') {
-    return company;
-  }
-
-  if (req.user?.role === 'manager' && req.user.companyId === companyId) {
+  if (hasCompanyManagementAccess(req.user, companyId)) {
     return company;
   }
 
@@ -121,11 +80,7 @@ const requireCompanyVisibility = async (req: AuthRequest, companyId: number): Pr
 const requireManagerOrAdminForCompany = async (req: AuthRequest, companyId: number): Promise<CompanyModel> => {
   const company = await requireCompany(companyId);
 
-  if (req.user?.role === 'admin') {
-    return company;
-  }
-
-  if (req.user?.role !== 'manager' || req.user.companyId !== companyId) {
+  if (!hasCompanyManagementAccess(req.user, companyId)) {
     throw new AppError('Forbidden', 403);
   }
 
@@ -178,10 +133,6 @@ const requireCompanyMember = async (companyId: number, userId: number): Promise<
 
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (!req.user || !['admin', 'manager'].includes(req.user.role)) {
-      throw new AppError('Forbidden', 403);
-    }
-
     const query = db<CompanyModel>('companies')
       .select(...companyColumns)
       .whereNull('deleted_at')
@@ -220,10 +171,6 @@ export const getCompanyById = async (req: AuthRequest, res: Response, next: Next
 
 export const createCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.user?.role !== 'admin') {
-      throw new AppError('Forbidden', 403);
-    }
-
     const name = String(req.body.name || '').trim();
     const description = req.body.description ?? null;
     const address = req.body.address ?? null;
@@ -296,10 +243,6 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
 
 export const deleteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.user?.role !== 'admin') {
-      throw new AppError('Forbidden', 403);
-    }
-
     const companyId = Number(req.params.id);
 
     if (!companyId) {
@@ -331,7 +274,7 @@ export const getCompanyUsers = async (req: AuthRequest, res: Response, next: Nex
     await requireManagerOrAdminForCompany(req, companyId);
 
     const users = await db<UserModel>('users')
-      .select(...userColumns)
+      .select(...USER_COLUMNS)
       .where({ company_id: companyId })
       .whereNull('deleted_at')
       .orderBy('id', 'asc');
@@ -344,10 +287,6 @@ export const getCompanyUsers = async (req: AuthRequest, res: Response, next: Nex
 
 export const assignCompanyUser = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.user?.role !== 'admin') {
-      throw new AppError('Forbidden', 403);
-    }
-
     const companyId = Number(req.params.id);
 
     if (!companyId) {
@@ -463,7 +402,7 @@ export const setCompanyManager = async (req: AuthRequest, res: Response, next: N
     }
 
     const isAdmin = req.user?.role === 'admin';
-    const isCurrentCompanyManager = req.user?.role === 'manager' && req.user.companyId === companyId;
+    const isCurrentCompanyManager = hasCompanyManagementAccess(req.user, companyId) && !isAdmin;
 
     if (!isAdmin && !isCurrentCompanyManager) {
       throw new AppError('Forbidden', 403);
@@ -679,10 +618,6 @@ export const setCompanyUserLimit = async (req: AuthRequest, res: Response, next:
 
 export const acceptCompanyUserDebtPayment = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    if (req.user?.role !== 'admin') {
-      throw new AppError('Forbidden', 403);
-    }
-
     const companyId = Number(req.params.id);
     const userId = Number(req.params.userId);
     const amountCents = Number(req.body.amountCents);

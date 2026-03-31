@@ -11,7 +11,12 @@ import {
   RouteModel,
   UserModel,
 } from '../models';
+import { hasCompanyManagementAccess } from '../utils/companyAccess';
 import { calculateOrderBilling } from '../utils/orderBilling';
+import {
+  requireAuthenticatedUser,
+  USER_COLUMNS,
+} from '../utils/userQueries';
 
 const orderColumns = [
   'id',
@@ -30,23 +35,6 @@ const orderColumns = [
   'updated_at',
   'deleted_at',
   'cancelled_at',
-] as const;
-
-const userColumns = [
-  'id',
-  'email',
-  'role',
-  'company_id',
-  'password_hash',
-  'email_verified_at',
-  'full_name',
-  'phone',
-  'avatar_url',
-  'order_limit_cents',
-  'debt_cents',
-  'created_at',
-  'updated_at',
-  'deleted_at',
 ] as const;
 
 const dishColumns = [
@@ -104,21 +92,7 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
 });
 
 const loadCurrentUser = async (req: AuthRequest): Promise<UserModel> => {
-  if (!req.user?.id) {
-    throw new AppError('Unauthorized', 401);
-  }
-
-  const user = await db<UserModel>('users')
-    .select(...userColumns)
-    .where({ id: req.user.id })
-    .whereNull('deleted_at')
-    .first();
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  return user;
+  return requireAuthenticatedUser(req.user);
 };
 
 const loadOrderById = async (id: number): Promise<OrderModel | undefined> =>
@@ -190,11 +164,7 @@ const getAvailableRouteForCompany = async (
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
 
-  if (user.role === 'admin') {
-    return user;
-  }
-
-  if (user.role === 'manager' && user.company_id === order.company_id) {
+  if (hasCompanyManagementAccess(user, order.company_id)) {
     return user;
   }
 
@@ -218,11 +188,7 @@ const requireOrderEditor = async (req: AuthRequest, order: OrderModel): Promise<
 const requireManagerOrAdminForOrder = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
 
-  if (user.role === 'admin') {
-    return user;
-  }
-
-  if (user.role === 'manager' && user.company_id === order.company_id) {
+  if (hasCompanyManagementAccess(user, order.company_id)) {
     return user;
   }
 
@@ -258,7 +224,7 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
   }
 
   const user = await trx<UserModel>('users')
-    .select(...userColumns)
+    .select(...USER_COLUMNS)
     .where({ id: order.user_id })
     .whereNull('deleted_at')
     .first();
@@ -311,10 +277,6 @@ const getNextOrderNumber = async (): Promise<string> => {
 export const getOrders = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const currentUser = await loadCurrentUser(req);
-
-    if (!['admin', 'manager'].includes(currentUser.role)) {
-      throw new AppError('Forbidden', 403);
-    }
 
     const query = db<OrderModel>('orders')
       .select(...orderColumns)
@@ -369,10 +331,6 @@ export const getOrderById = async (req: AuthRequest, res: Response, next: NextFu
 export const createOrder = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const currentUser = await loadCurrentUser(req);
-
-    if (!['employee', 'manager'].includes(currentUser.role)) {
-      throw new AppError('Only employees or managers can create orders', 403);
-    }
 
     if (!currentUser.company_id) {
       throw new AppError('User must belong to a company to create an order', 409);
@@ -663,9 +621,7 @@ export const patchOrderStatus = async (req: AuthRequest, res: Response, next: Ne
       throw new AppError('Status transition is not allowed', 409);
     }
 
-    const managerCanControl =
-      currentUser.role === 'admin' ||
-      (currentUser.role === 'manager' && currentUser.company_id === order.company_id);
+    const managerCanControl = hasCompanyManagementAccess(currentUser, order.company_id);
     const ownerCanPay = currentUser.id === order.user_id && order.status === 'created' && nextStatus === 'paid';
 
     if (!managerCanControl && !ownerCanPay) {

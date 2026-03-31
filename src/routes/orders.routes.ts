@@ -11,6 +11,7 @@ import {
   updateOrderDish,
 } from '../controllers/orders.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
+import { checkRole } from '../middleware/checkRole';
 
 const router = Router();
 
@@ -166,7 +167,7 @@ const router = Router();
  *       403:
  *         description: Forbidden
  */
-router.get('/orders', authenticateToken, getOrders);
+router.get('/orders', authenticateToken, checkRole(['admin', 'manager']), getOrders);
 
 /**
  * @swagger
@@ -218,7 +219,7 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  *       403:
  *         description: Only employees or managers can create orders
  */
-router.post('/orders', authenticateToken, createOrder);
+router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), createOrder);
 
 /**
  * @swagger
@@ -250,7 +251,7 @@ router.post('/orders', authenticateToken, createOrder);
  *       409:
  *         description: Order cannot be updated in the current status
  */
-router.put('/orders/:id', authenticateToken, updateOrder);
+router.put('/orders/:id', authenticateToken, checkRole(['employee', 'manager', 'admin']), updateOrder);
 
 /**
  * @swagger
@@ -272,7 +273,7 @@ router.put('/orders/:id', authenticateToken, updateOrder);
  *       409:
  *         description: Order cannot be cancelled in the current route or status
  */
-router.delete('/orders/:id', authenticateToken, cancelOrder);
+router.delete('/orders/:id', authenticateToken, checkRole(['employee', 'manager', 'admin']), cancelOrder);
 
 /**
  * @swagger
@@ -304,7 +305,7 @@ router.delete('/orders/:id', authenticateToken, cancelOrder);
  *       409:
  *         description: Only created orders can be edited
  */
-router.post('/orders/:id/dishes', authenticateToken, addOrderDish);
+router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'manager', 'admin']), addOrderDish);
 
 /**
  * @swagger
@@ -336,7 +337,7 @@ router.post('/orders/:id/dishes', authenticateToken, addOrderDish);
  *       404:
  *         description: Order item not found
  */
-router.put('/orders/:id/dishes', authenticateToken, updateOrderDish);
+router.put('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'manager', 'admin']), updateOrderDish);
 
 /**
  * @swagger
@@ -363,7 +364,7 @@ router.put('/orders/:id/dishes', authenticateToken, updateOrderDish);
  *       404:
  *         description: Order item not found
  */
-router.delete('/orders/:id/dishes/:dishId', authenticateToken, removeOrderDish);
+router.delete('/orders/:id/dishes/:dishId', authenticateToken, checkRole(['employee', 'manager', 'admin']), removeOrderDish);
 
 /**
  * @swagger
@@ -395,6 +396,6 @@ router.delete('/orders/:id/dishes/:dishId', authenticateToken, removeOrderDish);
  *       409:
  *         description: Status transition is not allowed
  */
-router.patch('/orders/:id/status', authenticateToken, patchOrderStatus);
+router.patch('/orders/:id/status', authenticateToken, checkRole(['employee', 'manager', 'admin']), patchOrderStatus);
 
 export default router;

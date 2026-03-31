@@ -3,6 +3,7 @@ import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CompanyModel, RouteModel, UserModel } from '../models';
+import { requireAuthenticatedUser } from '../utils/userQueries';
 
 const routeColumns = [
   'id',
@@ -47,43 +48,6 @@ const toRouteDto = (
   })),
 });
 
-const requireAdmin = async (req: AuthRequest): Promise<UserModel> => {
-  if (!req.user?.id) {
-    throw new AppError('Unauthorized', 401);
-  }
-
-  const user = await db<UserModel>('users')
-    .select(
-      'id',
-      'email',
-      'role',
-      'company_id',
-      'password_hash',
-      'email_verified_at',
-      'full_name',
-      'phone',
-      'avatar_url',
-      'order_limit_cents',
-      'debt_cents',
-      'created_at',
-      'updated_at',
-      'deleted_at'
-    )
-    .where({ id: req.user.id })
-    .whereNull('deleted_at')
-    .first();
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  if (user.role !== 'admin') {
-    throw new AppError('Forbidden', 403);
-  }
-
-  return user;
-};
-
 const validateRouteTimes = (departureAt: string, orderAcceptanceEndsAt: string) => {
   const departureDate = new Date(departureAt);
   const cutoffDate = new Date(orderAcceptanceEndsAt);
@@ -121,7 +85,7 @@ const loadRouteCompanies = async (routeId: number): Promise<Array<Pick<CompanyMo
 
 export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
 
     const query = db<RouteModel>('routes')
       .select(...routeColumns)
@@ -145,7 +109,7 @@ export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunct
 
 export const getRouteById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
 
     if (!routeId) {
@@ -162,7 +126,7 @@ export const getRouteById = async (req: AuthRequest, res: Response, next: NextFu
 
 export const createRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const { name, departureAt, orderAcceptanceEndsAt, description, companyIds } = req.body;
 
     if (!name || !departureAt || !orderAcceptanceEndsAt) {
@@ -208,7 +172,7 @@ export const createRoute = async (req: AuthRequest, res: Response, next: NextFun
 
 export const updateRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
 
     if (!routeId) {
@@ -273,7 +237,7 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
 
 export const deleteRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
 
     if (!routeId) {
@@ -295,7 +259,7 @@ export const deleteRoute = async (req: AuthRequest, res: Response, next: NextFun
 
 export const getRouteCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
 
     if (!routeId) {
@@ -312,7 +276,7 @@ export const getRouteCompanies = async (req: AuthRequest, res: Response, next: N
 
 export const assignRouteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
     const companyId = Number(req.body.companyId);
 
@@ -350,7 +314,7 @@ export const assignRouteCompany = async (req: AuthRequest, res: Response, next: 
 
 export const removeRouteCompany = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     const routeId = Number(req.params.id);
     const companyId = Number(req.params.companyId);
 

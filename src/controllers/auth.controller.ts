@@ -13,55 +13,16 @@ import { generateToken } from '../utils/generateToken';
 import { sendEmail } from '../utils/mailService';
 import { comparePassword, hashPassword } from '../utils/password';
 import { toUserDto } from '../utils/userMapper';
+import {
+  loadUserByEmail,
+  loadUserById,
+  requireAuthenticatedUser,
+  USER_COLUMNS,
+} from '../utils/userQueries';
 
 const LOGIN_CODE_TTL_SECONDS = 300;
 const PASSWORD_RESET_TTL_SECONDS = 900;
 const EMAIL_VERIFICATION_TTL_SECONDS = 900;
-
-const userColumns = [
-  'id',
-  'email',
-  'role',
-  'company_id',
-  'password_hash',
-  'email_verified_at',
-  'full_name',
-  'phone',
-  'avatar_url',
-  'order_limit_cents',
-  'debt_cents',
-  'created_at',
-  'updated_at',
-  'deleted_at',
-] as const;
-
-const loadUserById = async (id: number): Promise<UserModel | undefined> =>
-  db<UserModel>('users')
-    .select(...userColumns)
-    .where({ id })
-    .whereNull('deleted_at')
-    .first();
-
-const loadUserByEmail = async (email: string): Promise<UserModel | undefined> =>
-  db<UserModel>('users')
-    .select(...userColumns)
-    .where({ email })
-    .whereNull('deleted_at')
-    .first();
-
-const requireCurrentUser = async (authUser?: AuthTokenPayload): Promise<UserModel> => {
-  if (!authUser?.id) {
-    throw new AppError('Unauthorized', 401);
-  }
-
-  const user = await loadUserById(authUser.id);
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  return user;
-};
 
 const issueAuthResponse = (res: Response, user: UserModel) => {
   const token = generateToken({
@@ -323,7 +284,7 @@ export const passwordLogin = async (req: Request, res: Response, next: NextFunct
 
 export const getProfile = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const user = await requireCurrentUser(req.user);
+    const user = await requireAuthenticatedUser(req.user);
     res.json(toUserDto(user));
   } catch (error) {
     next(error);
@@ -332,7 +293,7 @@ export const getProfile = async (req: AuthRequest, res: Response, next: NextFunc
 
 export const updateProfile = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const user = await requireCurrentUser(req.user);
+    const user = await requireAuthenticatedUser(req.user);
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
@@ -351,7 +312,7 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
 
     await db('users').where({ id: user.id }).update(patch);
 
-    const updatedUser = await requireCurrentUser(req.user);
+    const updatedUser = await requireAuthenticatedUser(req.user);
     res.json(toUserDto(updatedUser));
   } catch (error) {
     next(error);
@@ -360,7 +321,7 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
 
 export const setPassword = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const user = await requireCurrentUser(req.user);
+    const user = await requireAuthenticatedUser(req.user);
     const currentPassword = req.body.currentPassword ? String(req.body.currentPassword) : '';
     const newPassword = String(req.body.newPassword || '');
 
@@ -381,7 +342,7 @@ export const setPassword = async (req: AuthRequest, res: Response, next: NextFun
       updated_at: new Date(),
     });
 
-    const updatedUser = await requireCurrentUser(req.user);
+    const updatedUser = await requireAuthenticatedUser(req.user);
     res.json(toUserDto(updatedUser));
   } catch (error) {
     next(error);
@@ -390,7 +351,7 @@ export const setPassword = async (req: AuthRequest, res: Response, next: NextFun
 
 export const deleteProfile = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const user = await requireCurrentUser(req.user);
+    const user = await requireAuthenticatedUser(req.user);
 
     await db('users').where({ id: user.id }).update({
       deleted_at: new Date(),
@@ -524,7 +485,7 @@ export const promoteUser = async (req: AuthRequest, res: Response, next: NextFun
 export const getAllUsers = async (_req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const users = await db<UserModel>('users')
-      .select(...userColumns)
+      .select(...USER_COLUMNS)
       .whereNull('deleted_at')
       .orderBy('id', 'asc');
 

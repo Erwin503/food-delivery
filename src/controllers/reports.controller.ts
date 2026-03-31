@@ -4,6 +4,7 @@ import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { OrderStatusHistoryModel, UserModel } from '../models';
 import { applyReportFont, createPdfBuffer, createZipArchive, sendPdf, sendZip } from '../utils/reportFiles';
+import { requireAuthenticatedUser } from '../utils/userQueries';
 
 type TodayOrderRow = {
   order_id: number;
@@ -63,23 +64,6 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Отменён',
 };
 
-const USER_COLUMNS = [
-  'id',
-  'email',
-  'role',
-  'company_id',
-  'password_hash',
-  'email_verified_at',
-  'full_name',
-  'phone',
-  'avatar_url',
-  'order_limit_cents',
-  'debt_cents',
-  'created_at',
-  'updated_at',
-  'deleted_at',
-] as const;
-
 const getTodayRange = () => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -112,28 +96,6 @@ const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
     doc.addPage();
     applyReportFont(doc);
   }
-};
-
-const requireAdmin = async (req: AuthRequest): Promise<UserModel> => {
-  if (!req.user?.id) {
-    throw new AppError('Unauthorized', 401);
-  }
-
-  const user = await db<UserModel>('users')
-    .select(...USER_COLUMNS)
-    .where({ id: req.user.id })
-    .whereNull('deleted_at')
-    .first();
-
-  if (!user) {
-    throw new AppError('User not found', 404);
-  }
-
-  if (user.role !== 'admin') {
-    throw new AppError('Forbidden', 403);
-  }
-
-  return user;
 };
 
 const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
@@ -595,7 +557,7 @@ export const downloadTodayOrdersReport = async (
   next: NextFunction
 ) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     sendPdf(res, 'orders-today.pdf', await buildOrdersReportPdf());
   } catch (error) {
     next(error);
@@ -608,7 +570,7 @@ export const downloadTodayDishesReport = async (
   next: NextFunction
 ) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     sendPdf(res, 'dishes-today.pdf', await buildDishesReportPdf());
   } catch (error) {
     next(error);
@@ -621,7 +583,7 @@ export const downloadTodayLabelsReport = async (
   next: NextFunction
 ) => {
   try {
-    await requireAdmin(req);
+    await requireAuthenticatedUser(req.user);
     sendPdf(res, 'labels-today.pdf', await buildLabelsReportPdf());
   } catch (error) {
     next(error);
@@ -637,7 +599,7 @@ export const runTodayReportsTestRequest = async (
   let createdRouteIds: number[] = [];
 
   try {
-    const admin = await requireAdmin(req);
+    const admin = await requireAuthenticatedUser(req.user);
     const temporaryData = await createTemporaryOrdersForReportTest(admin.id);
 
     createdOrderIds = temporaryData.createdOrderIds;
