@@ -39,6 +39,7 @@ export async function seed(knex: Knex): Promise<void> {
     { id: 5, email: 'employee.sidorova@cook.local', role: 'employee', company_id: 1, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Мария Сидорова', phone: '+79990000005', avatar_url: null, order_limit_cents: 90000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
     { id: 6, email: 'employee.vector@cook.local', role: 'employee', company_id: 2, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Алексей Воронов', phone: '+79990000006', avatar_url: null, order_limit_cents: 80000, debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null },
     { id: 7, email: 'employee.sever@cook.local', role: 'employee', company_id: 3, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Елена Котова', phone: '+79990000007', avatar_url: null, order_limit_cents: 70000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
+    { id: 8, email: 'employee.none@cook.local', role: 'employee', company_id: null, password_hash: defaultPasswordHash, email_verified_at: verifiedAt, full_name: 'Елена Котова', phone: '+79990000007', avatar_url: null, order_limit_cents: 70000, debt_cents: 0, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('auth_login_codes').insert([
