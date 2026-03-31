@@ -91,6 +91,39 @@ test('POST /api/orders creates a draft order from dishes for employee role', asy
   }
 });
 
+test('POST /api/orders/calculate returns total by items without creating an order', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/calculate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [
+          { dishId: 1, qty: 1 },
+          { dishId: 4, qty: 2 },
+        ],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.subtotalCents, 79700);
+    assert.equal(payload.totalCents, 79700);
+    assert.equal(payload.companyPaidCents, 79700);
+    assert.equal(payload.employeeDebtCents, 0);
+    assert.equal(payload.items.length, 2);
+
+    const ordersCount = await db('orders').count<{ count: number }>('id as count').first();
+    assert.equal(Number(ordersCount?.count ?? 0), 3);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('POST /api/orders creates a draft order from dishes for manager role in the same company', async () => {
   const { server, baseUrl } = await startTestServer();
 

@@ -288,6 +288,52 @@ const parseCreateOrderItems = (payload: unknown): Array<{ dishId: number; qty: n
   });
 };
 
+const calculateDraftOrderFromItems = async (
+  companyId: number,
+  items: Array<{ dishId: number; qty: number }>,
+  user: Pick<UserModel, 'order_limit_cents'>
+) => {
+  const company = await loadCompany(companyId);
+
+  if (!company) {
+    throw new AppError('Company not found', 404);
+  }
+
+  const priceBySubscription = hasActiveSubscription(company);
+  const aggregatedItems: Array<{
+    dishId: number;
+    qty: number;
+    priceCents: number;
+    lineTotalCents: number;
+  }> = [];
+
+  for (const item of items) {
+    const dish = await requireDish(item.dishId);
+    const priceCents = priceBySubscription ? dish.discount_price_cents : dish.base_price_cents;
+
+    aggregatedItems.push({
+      dishId: item.dishId,
+      qty: item.qty,
+      priceCents,
+      lineTotalCents: item.qty * priceCents,
+    });
+  }
+
+  const subtotalCents = aggregatedItems.reduce((sum, item) => sum + item.lineTotalCents, 0);
+  const totalCents = subtotalCents;
+  const billing = calculateOrderBilling(totalCents, {
+    orderLimitCents: user.order_limit_cents,
+  });
+
+  return {
+    subtotalCents,
+    totalCents,
+    companyPaidCents: billing.companyPaidCents,
+    employeeDebtCents: billing.employeeDebtCents,
+    items: aggregatedItems,
+  };
+};
+
 export const getOrders = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const currentUser = await loadCurrentUser(req);
@@ -435,6 +481,23 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     const order = await requireOrder(inserted);
     const createdItems = await loadOrderItems(inserted);
     res.status(201).json(toOrderDto(order, createdItems));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const calculateOrder = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const currentUser = await loadCurrentUser(req);
+    const items = parseCreateOrderItems(req.body.items);
+
+    if (!currentUser.company_id) {
+      throw new AppError('User must belong to a company to calculate an order', 409);
+    }
+
+    const calculated = await calculateDraftOrderFromItems(currentUser.company_id, items, currentUser);
+
+    res.json(calculated);
   } catch (error) {
     next(error);
   }

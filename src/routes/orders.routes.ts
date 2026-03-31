@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   addOrderDish,
+  calculateOrder,
   cancelOrder,
   createOrder,
   getOrderById,
@@ -106,6 +107,27 @@ const router = Router();
  *           type: integer
  *         discountCents:
  *           type: integer
+ *     CalculateOrderResponse:
+ *       type: object
+ *       required:
+ *         - subtotalCents
+ *         - totalCents
+ *         - companyPaidCents
+ *         - employeeDebtCents
+ *         - items
+ *       properties:
+ *         subtotalCents:
+ *           type: integer
+ *         totalCents:
+ *           type: integer
+ *         companyPaidCents:
+ *           type: integer
+ *         employeeDebtCents:
+ *           type: integer
+ *         items:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/OrderItem'
  *     OrderDishRequest:
  *       type: object
  *       required:
@@ -169,6 +191,32 @@ const router = Router();
  *         description: Forbidden
  */
 router.get('/orders', authenticateToken, checkRole(['admin', 'manager']), getOrders);
+
+/**
+ * @swagger
+ * /orders/calculate:
+ *   post:
+ *     summary: Calculate order total from dishes without creating an order
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateOrderRequest'
+ *     responses:
+ *       200:
+ *         description: Calculated order total
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CalculateOrderResponse'
+ *       403:
+ *         description: Only employees or managers can calculate orders
+ */
+router.post('/orders/calculate', authenticateToken, checkRole(['employee', 'manager']), calculateOrder);
 
 /**
  * @swagger
