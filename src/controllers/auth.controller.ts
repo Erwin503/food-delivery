@@ -8,6 +8,7 @@ import {
   UserModel,
 } from '../models';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { buildUploadedAvatarUrl } from '../middleware/uploadMiddleware';
 import { generateLoginCode } from '../utils/auth';
 import { generateToken } from '../utils/generateToken';
 import { isMailConfigured, queueEmail } from '../utils/mailService';
@@ -302,8 +303,8 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
       patch.phone = req.body.phone ?? null;
     }
 
-    if ('avatarUrl' in req.body) {
-      patch.avatar_url = req.body.avatarUrl ?? null;
+    if (req.file) {
+      patch.avatar_url = buildUploadedAvatarUrl(req.file.filename);
     }
 
     await db('users').where({ id: user.id }).update(patch);

@@ -154,6 +154,33 @@ test('GET /api/auth/profile returns current user for a valid bearer token', asyn
   }
 });
 
+test('PUT /api/auth/profile updates profile and uploads avatar for current user', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const token = generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
+    const formData = new FormData();
+    formData.append('fullName', 'Иван Иванов');
+    formData.append('avatar', new Blob(['fake-image-content'], { type: 'image/png' }), 'avatar.png');
+
+    const response = await fetch(`${baseUrl}/api/auth/profile`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.fullName, 'Иван Иванов');
+    assert.match(payload.avatarUrl, /^\/uploads\/avatars\/.+\.png$/);
+
+    const user = await db('users').where({ id: 4 }).first();
+    assert.match(user.avatar_url, /^\/uploads\/avatars\/.+\.png$/);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('PUT /api/auth/password sets a new password for the current user', async () => {
   const { server, baseUrl } = await startTestServer();
 

@@ -6,6 +6,12 @@ import { generateSessionQrCode } from './qrService';
 const smtpPort = Number(process.env.SMTP_PORT) || 2525;
 const smtpSecure =
   process.env.SMTP_SECURE != null ? process.env.SMTP_SECURE === 'true' : smtpPort === 465;
+const defaultFromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'no-reply@example.com';
+const defaultFromName = process.env.SMTP_FROM_NAME || 'Cook';
+
+let mailConnectionCheckedAt: string | null = null;
+let mailConnectionStatus: 'unknown' | 'not_configured' | 'ok' | 'error' = 'unknown';
+let mailConnectionMessage: string | null = null;
 
 export const mailTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
@@ -23,9 +29,9 @@ export const sendEmail = async (
   to: string,
   subject: string,
   html: string,
-  fromName = 'Система уведомлений'
+  fromName = defaultFromName
 ) => {
-  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
+  const from = `"${fromName}" <${defaultFromEmail}>`;
 
   await mailTransporter.sendMail({
     from,
@@ -37,6 +43,43 @@ export const sendEmail = async (
   logger.info('Email sent', { to, subject });
   return true;
 };
+
+export const verifyMailConnection = async (): Promise<void> => {
+  mailConnectionCheckedAt = new Date().toISOString();
+
+  if (!isMailConfigured()) {
+    mailConnectionStatus = 'not_configured';
+    mailConnectionMessage = 'SMTP credentials are not configured';
+    return;
+  }
+
+  try {
+    await mailTransporter.verify();
+    mailConnectionStatus = 'ok';
+    mailConnectionMessage = null;
+    logger.info('SMTP connection verified', {
+      host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
+      port: smtpPort,
+      secure: smtpSecure,
+    });
+  } catch (error) {
+    mailConnectionStatus = 'error';
+    mailConnectionMessage = error instanceof Error ? error.message : String(error);
+    logger.error('SMTP connection verification failed', {
+      host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
+      port: smtpPort,
+      secure: smtpSecure,
+      error: mailConnectionMessage,
+    });
+  }
+};
+
+export const getMailHealth = () => ({
+  configured: isMailConfigured(),
+  status: mailConnectionStatus,
+  checkedAt: mailConnectionCheckedAt,
+  message: mailConnectionMessage,
+});
 
 export const queueEmail = (to: string, subject: string, html: string, fromName?: string): void => {
   if (!isMailConfigured()) {

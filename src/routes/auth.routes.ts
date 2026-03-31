@@ -16,6 +16,7 @@ import {
 } from '../controllers/auth.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
+import { avatarImageUpload } from '../middleware/uploadMiddleware';
 
 const router = Router();
 
@@ -140,9 +141,21 @@ const router = Router();
  *         phone:
  *           type: string
  *           nullable: true
- *         avatarUrl:
+ *         avatar:
+ *           type: string
+ *           format: binary
+ *     UpdateProfileMultipartRequest:
+ *       type: object
+ *       properties:
+ *         fullName:
  *           type: string
  *           nullable: true
+ *         phone:
+ *           type: string
+ *           nullable: true
+ *         avatar:
+ *           type: string
+ *           format: binary
  *     SetPasswordRequest:
  *       type: object
  *       required:
@@ -371,7 +384,7 @@ router.get('/profile', authenticateToken, getProfile);
  * @swagger
  * /auth/profile:
  *   put:
- *     summary: Update current user profile
+ *     summary: Update current user profile and optionally upload avatar
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []
@@ -381,6 +394,9 @@ router.get('/profile', authenticateToken, getProfile);
  *         application/json:
  *           schema:
  *             $ref: '#/components/schemas/UpdateProfileRequest'
+ *         multipart/form-data:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProfileMultipartRequest'
  *     responses:
  *       200:
  *         description: Updated user
@@ -389,7 +405,7 @@ router.get('/profile', authenticateToken, getProfile);
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
-router.put('/profile', authenticateToken, updateProfile);
+router.put('/profile', authenticateToken, avatarImageUpload.single('avatar'), updateProfile);
 
 /**
  * @swagger
