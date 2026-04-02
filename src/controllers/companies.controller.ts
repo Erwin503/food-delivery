@@ -436,17 +436,22 @@ export const setCompanyManager = async (req: AuthRequest, res: Response, next: N
 
 export const createCompanyJoinCode = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = parseRequiredId(req.params.id, 'Company id');
-
-    await requireManagerOrAdminForCompany(req, companyId);
-
     const currentUser = await requireCurrentUser(req);
+
+    if (currentUser.role !== 'employee') {
+      throw new AppError('Only employee users can create a personal company join code', 403);
+    }
+
+    if (currentUser.company_id) {
+      throw new AppError('User already belongs to a company', 409);
+    }
+
     const code = generateLoginCode();
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + COMPANY_JOIN_CODE_TTL_SECONDS * 1000);
 
     await db('company_join_codes').insert({
-      company_id: companyId,
+      company_id: null,
       code,
       created_by_user_id: currentUser.id,
       consumed_by_user_id: null,
@@ -498,17 +503,22 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
   try {
     const currentUser = await requireCurrentUser(req);
     const code = String(req.body.code || '').trim();
+    const requestedCompanyId = req.body.companyId ? Number(req.body.companyId) : null;
 
     if (!code) {
       throw new AppError('Code is required', 400);
     }
 
-    if (currentUser.role !== 'employee') {
-      throw new AppError('Only employee users can join a company by code', 403);
+    if (currentUser.role !== 'manager' && currentUser.role !== 'admin') {
+      throw new AppError('Only manager or admin can confirm company join by code', 403);
     }
 
-    if (currentUser.company_id) {
-      throw new AppError('User already belongs to a company', 409);
+    if (currentUser.role === 'manager' && !currentUser.company_id) {
+      throw new AppError('Manager must belong to a company', 409);
+    }
+
+    if (currentUser.role === 'admin' && !requestedCompanyId) {
+      throw new AppError('companyId is required for admin company join confirmation', 400);
     }
 
     const joinCode = await db<CompanyJoinCodeModel>('company_join_codes')
@@ -525,22 +535,39 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
       throw new AppError('Company join code expired', 401);
     }
 
-    await requireCompany(joinCode.company_id);
+    const targetUser = await requireUserById(joinCode.created_by_user_id);
+
+    if (targetUser.role !== 'employee') {
+      throw new AppError('Only employee users can join a company by personal code', 409);
+    }
+
+    if (targetUser.company_id) {
+      throw new AppError('User already belongs to a company', 409);
+    }
+
+    const companyId = currentUser.role === 'manager' ? currentUser.company_id : requestedCompanyId;
+
+    if (!companyId) {
+      throw new AppError('Company id is required', 400);
+    }
+
+    await requireCompany(companyId);
 
     const now = new Date();
     await db.transaction(async (trx) => {
       await trx('company_join_codes').where({ id: joinCode.id }).update({
+        company_id: companyId,
         consumed_by_user_id: currentUser.id,
         consumed_at: now,
       });
 
-      await trx('users').where({ id: currentUser.id }).update({
-        company_id: joinCode.company_id,
+      await trx('users').where({ id: targetUser.id }).update({
+        company_id: companyId,
         updated_at: now,
       });
     });
 
-    const updatedUser = await requireUserById(currentUser.id);
+    const updatedUser = await requireUserById(targetUser.id);
     res.json(toUserDto(updatedUser));
   } catch (error) {
     next(error);

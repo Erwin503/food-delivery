@@ -277,7 +277,7 @@ test('PATCH /api/orders/:id/status increases company debt by the covered part of
     assert.equal(response.status, 200);
 
     const company = await db('companies').where({ id: 1 }).first();
-    assert.equal(company.debt_cents, 100000);
+    assert.equal(company.debt_cents, 100);
   } finally {
     await stopTestServer(server);
   }
@@ -399,13 +399,13 @@ test('POST /api/companies/:id/subscription purchases or extends company subscrip
   }
 });
 
-test('POST /api/companies/:id/join-code creates a short join code for the manager company', async () => {
+test('POST /api/companies/join-code creates a personal short join code for a free employee', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const response = await fetch(`${baseUrl}/api/companies/1/join-code`, {
+    const response = await fetch(`${baseUrl}/api/companies/join-code`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${managerToken()}` },
+      headers: { Authorization: `Bearer ${freeEmployeeToken()}` },
     });
 
     assert.equal(response.status, 201);
@@ -413,12 +413,16 @@ test('POST /api/companies/:id/join-code creates a short join code for the manage
     assert.equal(typeof payload.code, 'string');
     assert.equal(payload.code.length, 6);
     assert.equal(payload.expiresInSeconds, 900);
+
+    const code = await db('company_join_codes').where({ code: payload.code }).first();
+    assert.equal(code.created_by_user_id, 7);
+    assert.equal(code.company_id, null);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/companies/join lets a regular user join company with a short code', async () => {
+test('POST /api/companies/join lets a manager confirm employee join to own company with employee code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -428,16 +432,16 @@ test('POST /api/companies/join lets a regular user join company with a short cod
       updated_at: '2026-03-15 09:00:00',
     });
 
-    const joinCodeResponse = await fetch(`${baseUrl}/api/companies/1/join-code`, {
+    const joinCodeResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${managerToken()}` },
+      headers: { Authorization: `Bearer ${freeEmployeeToken()}` },
     });
     const joinCodePayload = await joinCodeResponse.json();
 
     const response = await fetch(`${baseUrl}/api/companies/join`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${freeEmployeeToken()}`,
+        Authorization: `Bearer ${managerToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ code: joinCodePayload.code }),
@@ -451,7 +455,49 @@ test('POST /api/companies/join lets a regular user join company with a short cod
     assert.equal(user.company_id, 1);
 
     const code = await db('company_join_codes').where({ code: joinCodePayload.code }).first();
-    assert.equal(code.consumed_by_user_id, 7);
+    assert.equal(code.company_id, 1);
+    assert.equal(code.consumed_by_user_id, 2);
+    assert.ok(code.consumed_at);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/companies/join lets admin confirm employee join to selected company by code', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('users').where({ id: 7 }).update({
+      company_id: null,
+      role: 'employee',
+      updated_at: '2026-03-15 09:00:00',
+    });
+
+    const joinCodeResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${freeEmployeeToken()}` },
+    });
+    const joinCodePayload = await joinCodeResponse.json();
+
+    const response = await fetch(`${baseUrl}/api/companies/join`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code: joinCodePayload.code, companyId: 2 }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.companyId, 2);
+
+    const user = await db('users').where({ id: 7 }).first();
+    assert.equal(user.company_id, 2);
+
+    const code = await db('company_join_codes').where({ code: joinCodePayload.code }).first();
+    assert.equal(code.company_id, 2);
+    assert.equal(code.consumed_by_user_id, 1);
     assert.ok(code.consumed_at);
   } finally {
     await stopTestServer(server);

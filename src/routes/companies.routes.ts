@@ -134,6 +134,9 @@ const router = Router();
  *       properties:
  *         code:
  *           type: string
+ *         companyId:
+ *           type: integer
+ *           nullable: true
  *     CompanySubscriptionResponse:
  *       allOf:
  *         - $ref: '#/components/schemas/Company'
@@ -182,7 +185,7 @@ router.post('/companies', authenticateToken, checkRole(['admin']), createCompany
  * @swagger
  * /companies/join:
  *   post:
- *     summary: Join a company using a short code
+ *     summary: Confirm employee join to a company using employee personal code
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
@@ -194,7 +197,7 @@ router.post('/companies', authenticateToken, checkRole(['admin']), createCompany
  *             $ref: '#/components/schemas/JoinCompanyRequest'
  *     responses:
  *       200:
- *         description: User joined the company
+ *         description: Employee joined the company
  *         content:
  *           application/json:
  *             schema:
@@ -202,7 +205,7 @@ router.post('/companies', authenticateToken, checkRole(['admin']), createCompany
  *       401:
  *         description: Invalid or expired code
  */
-router.post('/companies/join', authenticateToken, checkRole(['employee']), joinCompanyByCode);
+router.post('/companies/join', authenticateToken, checkRole(['manager', 'admin']), joinCompanyByCode);
 
 /**
  * @swagger
@@ -491,18 +494,12 @@ router.post('/companies/:id/subscription', authenticateToken, checkRole(['admin'
 
 /**
  * @swagger
- * /companies/{id}/join-code:
+ * /companies/join-code:
  *   post:
- *     summary: Generate a short code for joining the company
+ *     summary: Create a personal employee code for joining a company
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
  *     responses:
  *       201:
  *         description: Join code generated
@@ -511,6 +508,6 @@ router.post('/companies/:id/subscription', authenticateToken, checkRole(['admin'
  *             schema:
  *               $ref: '#/components/schemas/CompanyJoinCodeResponse'
  */
-router.post('/companies/:id/join-code', authenticateToken, checkRole(['admin', 'manager']), createCompanyJoinCode);
+router.post('/companies/join-code', authenticateToken, checkRole(['employee']), createCompanyJoinCode);
 
 export default router;
