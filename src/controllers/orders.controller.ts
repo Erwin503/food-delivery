@@ -302,9 +302,9 @@ const ensureUserCanCreateOnlyOneOrderPerDay = async (userId: number): Promise<vo
     .andWhere('created_at', '<', end)
     .first();
 
-  if (existingOrder) {
-    throw new AppError('User can create only one order per day', 409);
-  }
+  // if (existingOrder) {
+  //   throw new AppError('User can create only one order per day', 409);
+  // }
 };
 
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
