@@ -60,6 +60,64 @@ test('GET /api/orders/:id returns order details with items for owner, manager, o
   }
 });
 
+test('GET /api/orders/my returns current user previous orders', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/my`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.length, 1);
+    assert.equal(payload[0].userId, 4);
+    assert.equal(payload[0].id, 1);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('GET /api/orders/can-create-today shows whether user can create an order today', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('orders').where({ id: 1 }).update({
+      created_at: new Date(),
+      updated_at: new Date(),
+      status: 'created',
+      deleted_at: null,
+      cancelled_at: null,
+    });
+
+    const busyResponse = await fetch(`${baseUrl}/api/orders/can-create-today`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(busyResponse.status, 200);
+    const busyPayload = await busyResponse.json();
+    assert.equal(busyPayload.canCreateOrder, false);
+    assert.equal(busyPayload.existingOrder.id, 1);
+
+    await db('orders').where({ id: 1 }).update({
+      status: 'cancelled',
+      cancelled_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const freeResponse = await fetch(`${baseUrl}/api/orders/can-create-today`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(freeResponse.status, 200);
+    const freePayload = await freeResponse.json();
+    assert.equal(freePayload.canCreateOrder, true);
+    assert.equal(freePayload.existingOrder, null);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('POST /api/orders creates a draft order from dishes for employee role', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -113,6 +171,7 @@ test('POST /api/orders/calculate returns total by items without creating an orde
     const payload = await response.json();
     assert.equal(payload.subtotalCents, 81700);
     assert.equal(payload.totalCents, 81700);
+    assert.equal(payload.orderLimitCents, 100);
     assert.equal(payload.companyPaidCents, 100);
     assert.equal(payload.employeeDebtCents, 81600);
     assert.equal(payload.items.length, 2);

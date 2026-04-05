@@ -292,9 +292,17 @@ const loadPricingSourcesForRequestedItems = async (
 };
 
 const ensureUserCanCreateOnlyOneOrderPerDay = async (userId: number): Promise<void> => {
+  const { canCreateOrder } = await getUserOrderAvailability(userId);
+
+  if (!canCreateOrder) {
+    throw new AppError('User can create only one order per day', 409);
+  }
+};
+
+const getUserOrderAvailability = async (userId: number) => {
   const { start, end } = getTodayBounds();
   const existingOrder = await db<OrderModel>('orders')
-    .select('id')
+    .select(...orderColumns)
     .where({ user_id: userId })
     .whereNull('deleted_at')
     .whereNot('status', 'cancelled')
@@ -302,9 +310,10 @@ const ensureUserCanCreateOnlyOneOrderPerDay = async (userId: number): Promise<vo
     .andWhere('created_at', '<', end)
     .first();
 
-  // if (existingOrder) {
-  //   throw new AppError('User can create only one order per day', 409);
-  // }
+  return {
+    canCreateOrder: !existingOrder,
+    existingOrder,
+  };
 };
 
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
@@ -502,6 +511,7 @@ const calculateDraftOrderFromItems = async (
   return {
     subtotalCents,
     totalCents,
+    orderLimitCents: Math.max(Number(user.order_limit_cents ?? 0) || 0, 0),
     companyPaidCents: billing.companyPaidCents,
     employeeDebtCents: billing.employeeDebtCents,
     items: pricedItems,
@@ -553,6 +563,37 @@ export const getOrderById = async (req: AuthRequest, res: Response, next: NextFu
     const items = await loadOrderItems(orderId);
 
     res.json(toOrderDto(order, items));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMyOrders = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const currentUser = await loadCurrentUser(req);
+
+    const orders = await db<OrderModel>('orders')
+      .select(...orderColumns)
+      .where({ user_id: currentUser.id })
+      .whereNull('deleted_at')
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc');
+
+    res.json(orders.map((order) => toOrderDto(order)));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getOrderAvailability = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const currentUser = await loadCurrentUser(req);
+    const availability = await getUserOrderAvailability(currentUser.id);
+
+    res.json({
+      canCreateOrder: availability.canCreateOrder,
+      existingOrder: availability.existingOrder ? toOrderDto(availability.existingOrder) : null,
+    });
   } catch (error) {
     next(error);
   }

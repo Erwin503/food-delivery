@@ -4,6 +4,8 @@ import {
   calculateOrder,
   cancelOrder,
   createOrder,
+  getMyOrders,
+  getOrderAvailability,
   getOrderById,
   getOrders,
   patchOrderStatus,
@@ -132,6 +134,8 @@ const router = Router();
  *           type: integer
  *         totalCents:
  *           type: integer
+ *         orderLimitCents:
+ *           type: integer
  *         companyPaidCents:
  *           type: integer
  *         employeeDebtCents:
@@ -162,6 +166,18 @@ const router = Router();
  *           type: string
  *           enum: [paid, cooking, delivering, completed, cancelled]
  *           example: paid
+ *     OrderAvailabilityResponse:
+ *       type: object
+ *       required:
+ *         - canCreateOrder
+ *         - existingOrder
+ *       properties:
+ *         canCreateOrder:
+ *           type: boolean
+ *         existingOrder:
+ *           nullable: true
+ *           allOf:
+ *             - $ref: '#/components/schemas/Order'
  */
 
 /**
@@ -203,6 +219,44 @@ const router = Router();
  *         description: Forbidden
  */
 router.get('/orders', authenticateToken, checkRole(['admin', 'manager']), getOrders);
+
+/**
+ * @swagger
+ * /orders/my:
+ *   get:
+ *     summary: List current user previous orders
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user orders
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Order'
+ */
+router.get('/orders/my', authenticateToken, checkRole(['employee', 'manager', 'admin']), getMyOrders);
+
+/**
+ * @swagger
+ * /orders/can-create-today:
+ *   get:
+ *     summary: Check whether current user can create an order today
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Order creation availability
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderAvailabilityResponse'
+ */
+router.get('/orders/can-create-today', authenticateToken, checkRole(['employee', 'manager', 'admin']), getOrderAvailability);
 
 /**
  * @swagger
