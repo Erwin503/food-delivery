@@ -575,7 +575,6 @@ export const getMyOrders = async (req: AuthRequest, res: Response, next: NextFun
     const orders = await db<OrderModel>('orders')
       .select(...orderColumns)
       .where({ user_id: currentUser.id })
-      .whereNull('deleted_at')
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc');
 

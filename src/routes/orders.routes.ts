@@ -224,13 +224,13 @@ router.get('/orders', authenticateToken, checkRole(['admin', 'manager']), getOrd
  * @swagger
  * /orders/my:
  *   get:
- *     summary: List current user previous orders
+ *     summary: List all current user orders
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Current user orders
+ *         description: All current user orders
  *         content:
  *           application/json:
  *             schema:

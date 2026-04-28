@@ -60,19 +60,39 @@ test('GET /api/orders/:id returns order details with items for owner, manager, o
   }
 });
 
-test('GET /api/orders/my returns current user previous orders', async () => {
+test('GET /api/orders/my returns all current user orders including a soft-deleted one and a new one from today', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await db('orders').where({ id: 1 }).update({
+      deleted_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const createResponse = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [{ dishId: 1, qty: 1 }],
+      }),
+    });
+
+    assert.equal(createResponse.status, 201);
+
     const response = await fetch(`${baseUrl}/api/orders/my`, {
       headers: { Authorization: `Bearer ${employeeToken()}` },
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.length, 1);
-    assert.equal(payload[0].userId, 4);
-    assert.equal(payload[0].id, 1);
+    assert.equal(payload.length, 2);
+    assert.equal(payload.every((order: { userId: number }) => order.userId === 4), true);
+    assert.equal(payload.some((order: { id: number }) => order.id === 1), true);
+    assert.equal(payload.find((order: { id: number }) => order.id === 1)?.updatedAt !== null, true);
+    assert.equal(payload[0].createdAt >= payload[1].createdAt, true);
   } finally {
     await stopTestServer(server);
   }
