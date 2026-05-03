@@ -143,6 +143,40 @@ const loadOrderItems = async (orderId: number): Promise<OrderItemModel[]> =>
     .where({ order_id: orderId })
     .orderBy('dish_id', 'asc');
 
+const loadOrderItemsByOrderIds = async (orderIds: number[]): Promise<Map<number, OrderItemModel[]>> => {
+  if (orderIds.length === 0) {
+    return new Map();
+  }
+
+  const items = await db<OrderItemModel>('order_items')
+    .select(
+      'order_id',
+      'dish_id',
+      'category_id',
+      'qty',
+      'price_cents',
+      'base_price_cents',
+      'discount_price_cents',
+      'discounted_qty',
+      'line_total_cents',
+      'created_at',
+      'updated_at'
+    )
+    .whereIn('order_id', orderIds)
+    .orderBy('order_id', 'asc')
+    .orderBy('dish_id', 'asc');
+
+  const itemsByOrderId = new Map<number, OrderItemModel[]>();
+
+  for (const item of items) {
+    const bucket = itemsByOrderId.get(item.order_id) ?? [];
+    bucket.push(item);
+    itemsByOrderId.set(item.order_id, bucket);
+  }
+
+  return itemsByOrderId;
+};
+
 const requireOrder = async (id: number): Promise<OrderModel> =>
   requireEntity(() => loadOrderById(id), 'Order not found');
 
@@ -578,7 +612,9 @@ export const getMyOrders = async (req: AuthRequest, res: Response, next: NextFun
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc');
 
-    res.json(orders.map((order) => toOrderDto(order)));
+    const itemsByOrderId = await loadOrderItemsByOrderIds(orders.map((order) => order.id));
+
+    res.json(orders.map((order) => toOrderDto(order, itemsByOrderId.get(order.id) ?? [])));
   } catch (error) {
     next(error);
   }
