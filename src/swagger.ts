@@ -2,6 +2,8 @@ import path from 'path';
 import swaggerJSDoc from 'swagger-jsdoc';
 import { version, description } from '../package.json';
 
+const publicApiUrl = process.env.PUBLIC_API_URL?.trim();
+
 const swaggerDefinition = {
   openapi: '3.0.0',
   info: {
@@ -9,7 +11,12 @@ const swaggerDefinition = {
     version,
     description,
   },
-  servers: [{ url: 'http://localhost:3000/api', description: 'Local server' }],
+  servers: [
+    {
+      url: publicApiUrl || '/api',
+      description: publicApiUrl ? 'Configured API server' : 'Current server',
+    },
+  ],
   components: {
     securitySchemes: {
       bearerAuth: {
