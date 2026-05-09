@@ -43,16 +43,16 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('auth_login_codes').insert([
-    { id: 1, email: 'employee.ivanov@cook.local', code: '123456', expires_at: '2030-03-15 09:05:00', consumed_at: null, created_at: now },
-    { id: 2, email: 'manager.romashka@cook.local', code: '654321', expires_at: '2030-03-15 09:05:00', consumed_at: '2026-03-15 09:02:00', created_at: now },
+    { id: 1, email: 'employee.ivanov@cook.local', code: '1234', expires_at: '2030-03-15 09:05:00', consumed_at: null, created_at: now },
+    { id: 2, email: 'manager.romashka@cook.local', code: '6543', expires_at: '2030-03-15 09:05:00', consumed_at: '2026-03-15 09:02:00', created_at: now },
   ]);
 
   await knex('auth_email_verification_codes').insert([
-    { id: 1, email: 'new.signup@cook.local', code: '222333', expires_at: '2030-03-15 09:15:00', consumed_at: null, created_at: now },
+    { id: 1, email: 'new.signup@cook.local', code: '2223', expires_at: '2030-03-15 09:15:00', consumed_at: null, created_at: now },
   ]);
 
   await knex('auth_password_reset_codes').insert([
-    { id: 1, email: 'employee.ivanov@cook.local', code: '111222', expires_at: '2030-03-15 09:15:00', consumed_at: null, created_at: now },
+    { id: 1, email: 'employee.ivanov@cook.local', code: '1112', expires_at: '2030-03-15 09:15:00', consumed_at: null, created_at: now },
   ]);
 
   await knex('company_managers').insert([

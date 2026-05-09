@@ -38,40 +38,47 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
       .orderBy('id', 'desc')
       .first();
     assert.ok(code);
+    assert.equal(String(code.code).length, 4);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/auth/signup/confirm verifies email and returns JWT', async () => {
+test('POST /api/auth/signup/confirm verifies the code created during password signup and returns JWT', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
-    await db('users').insert({
-      email: 'new.signup@cook.local',
-      role: 'employee',
-      company_id: null,
-      password_hash: '$2a$10$gqcYbN4vYkR1A4X4dJVxBO9Ukr0lG/PbI1jW8C0z7v5SKl7R4T2uK',
-      email_verified_at: null,
-      full_name: 'New Signup',
-      phone: null,
-      avatar_url: null,
-      created_at: '2026-03-15 09:00:00',
-      updated_at: '2026-03-15 09:00:00',
-      deleted_at: null,
+    const signupResponse = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'new.signup.confirm@cook.local',
+        password: 'Password123!',
+      }),
     });
+    assert.equal(signupResponse.status, 201);
+
+    const verificationCode = await db('auth_email_verification_codes')
+      .where({ email: 'new.signup.confirm@cook.local' })
+      .orderBy('id', 'desc')
+      .first();
+    assert.ok(verificationCode);
+    assert.equal(String(verificationCode.code).length, 4);
 
     const response = await fetch(`${baseUrl}/api/auth/signup/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'new.signup@cook.local', code: '222333' }),
+      body: JSON.stringify({
+        email: 'new.signup.confirm@cook.local',
+        code: String(verificationCode.code),
+      }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.user.email, 'new.signup@cook.local');
+    assert.equal(payload.user.email, 'new.signup.confirm@cook.local');
 
-    const user = await db('users').where({ email: 'new.signup@cook.local' }).first();
+    const user = await db('users').where({ email: 'new.signup.confirm@cook.local' }).first();
     assert.ok(user.email_verified_at);
   } finally {
     await stopTestServer(server);
@@ -112,7 +119,7 @@ test('POST /api/auth/login/step2 returns JWT and marks email as verified', async
     const response = await fetch(`${baseUrl}/api/auth/login/step2`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '123456' }),
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234' }),
     });
 
     assert.equal(response.status, 200);
@@ -226,7 +233,7 @@ test('POST /api/auth/password/reset/confirm resets the password using a valid co
     const response = await fetch(`${baseUrl}/api/auth/password/reset/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '111222', newPassword: 'Recovered123!' }),
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1112', newPassword: 'Recovered123!' }),
     });
 
     assert.equal(response.status, 200);
