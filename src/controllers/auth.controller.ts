@@ -9,7 +9,7 @@ import {
 } from '../models';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildUploadedAvatarUrl } from '../middleware/uploadMiddleware';
-import { generateLoginCode } from '../utils/auth';
+import { generateLoginCode, generateTemporaryPassword } from '../utils/auth';
 import { generateToken } from '../utils/generateToken';
 import { isMailConfigured, queueEmail } from '../utils/mailService';
 import { comparePassword, hashPassword } from '../utils/password';
@@ -166,19 +166,43 @@ export const loginStep1 = async (req: Request, res: Response, next: NextFunction
     const code = generateLoginCode();
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + LOGIN_CODE_TTL_SECONDS * 1000);
+    const existingUser = await loadUserByEmail(email);
+    const temporaryPassword = existingUser ? null : generateTemporaryPassword();
 
-    await db('auth_login_codes').insert({
-      email,
-      code,
-      expires_at: expiresAt,
-      consumed_at: null,
-      created_at: createdAt,
+    await db.transaction(async (trx) => {
+      if (!existingUser) {
+        await trx('users').insert({
+          email,
+          role: 'employee',
+          company_id: null,
+          password_hash: await hashPassword(temporaryPassword as string),
+          email_verified_at: null,
+          full_name: null,
+          phone: null,
+          avatar_url: null,
+          order_limit_cents: 0,
+          debt_cents: 0,
+          created_at: createdAt,
+          updated_at: createdAt,
+          deleted_at: null,
+        });
+      }
+
+      await trx('auth_login_codes').insert({
+        email,
+        code,
+        expires_at: expiresAt,
+        consumed_at: null,
+        created_at: createdAt,
+      });
     });
 
     sendEmailIfConfigured(
       email,
-      'Your login code',
-      `<p>Your verification code is <strong>${code}</strong>.</p>`
+      temporaryPassword ? 'Your login code and temporary password' : 'Your login code',
+      temporaryPassword
+        ? `<p>Your verification code is <strong>${code}</strong>.</p><p>Your temporary password is <strong>${temporaryPassword}</strong>.</p>`
+        : `<p>Your verification code is <strong>${code}</strong>.</p>`
     );
 
     res.json({
@@ -222,11 +246,12 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
     let user = await loadUserByEmail(email);
 
     if (!user) {
+      const temporaryPassword = generateTemporaryPassword();
       const inserted = await db('users').insert({
         email,
         role: 'employee',
         company_id: null,
-        password_hash: null,
+        password_hash: await hashPassword(temporaryPassword),
         email_verified_at: verifiedAt,
         full_name: null,
         phone: null,

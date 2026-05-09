@@ -93,6 +93,11 @@ test('POST /api/auth/login/step1 sends a one-time email code', async () => {
 
     const codeRow = await db('auth_login_codes').where({ email: 'new.user@cook.local' }).orderBy('id', 'desc').first();
     assert.ok(codeRow);
+    assert.equal(String(codeRow.code).length, 4);
+
+    const user = await db('users').where({ email: 'new.user@cook.local' }).first();
+    assert.ok(user);
+    assert.ok(user.password_hash);
   } finally {
     await stopTestServer(server);
   }

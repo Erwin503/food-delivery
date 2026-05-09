@@ -118,7 +118,7 @@ const router = Router();
  *           format: email
  *         code:
  *           type: string
- *           example: "123456"
+ *           example: "1234"
  *     PasswordLoginRequest:
  *       type: object
  *       required:
@@ -187,7 +187,7 @@ const router = Router();
  *           format: email
  *         code:
  *           type: string
- *           example: "111222"
+ *           example: "1112"
  *         newPassword:
  *           type: string
  *           format: password
@@ -237,7 +237,7 @@ const router = Router();
  *           format: email
  *         code:
  *           type: string
- *           example: "654321"
+ *           example: "6543"
  */
 
 /**
@@ -292,7 +292,7 @@ router.post('/signup/confirm', confirmSignup);
  * @swagger
  * /auth/login/step1:
  *   post:
- *     summary: Request a one-time login code by email
+ *     summary: Request a one-time login code by email and create a new employee with a temporary password if needed
  *     tags: [Auth]
  *     requestBody:
  *       required: true

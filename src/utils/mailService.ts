@@ -1,29 +1,49 @@
-import nodemailer from 'nodemailer';
 import knex from '../db/knex';
 import logger from './logger';
 import { generateSessionQrCode } from './qrService';
 
-const smtpPort = Number(process.env.SMTP_PORT) || 2525;
-const smtpSecure =
-  process.env.SMTP_SECURE != null ? process.env.SMTP_SECURE === 'true' : smtpPort === 465;
-const defaultFromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || 'no-reply@example.com';
+const defaultFromEmail = process.env.SMTP_FROM_EMAIL || 'no-reply@example.com';
 const defaultFromName = process.env.SMTP_FROM_NAME || 'Cook';
+const unisenderApiUrl = process.env.UNISENDER_API_URL || 'https://api.unisender.com/ru/api/sendEmail';
+const unisenderApiKey = process.env.UNISENDER_API_KEY?.trim() || '';
+const unisenderListId = process.env.UNISENDER_LIST_ID?.trim() || '';
 
 let mailConnectionCheckedAt: string | null = null;
 let mailConnectionStatus: 'unknown' | 'not_configured' | 'ok' | 'error' = 'unknown';
 let mailConnectionMessage: string | null = null;
+const unisenderProviderName = 'unisender_api';
 
-export const mailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
-  port: smtpPort,
-  secure: smtpSecure,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const getUnisenderListsUrl = (): string => {
+  try {
+    const url = new URL(unisenderApiUrl);
+    url.pathname = url.pathname.replace(/sendEmail\/?$/, 'getLists');
+    return url.toString();
+  } catch {
+    return 'https://api.unisender.com/ru/api/getLists';
+  }
+};
 
-export const isMailConfigured = (): boolean => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+const isUnisenderConfigured = (): boolean => Boolean(unisenderApiKey && unisenderListId && defaultFromEmail);
+
+export const isMailConfigured = (): boolean => isUnisenderConfigured();
+
+const parseUnisenderResponse = async (response: Response) => {
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(`Unisender API request failed with status ${response.status}`);
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Unisender API returned an invalid response');
+  }
+
+  if ('error' in payload && payload.error) {
+    throw new Error(String(payload.error));
+  }
+
+  return payload as Record<string, unknown>;
+};
 
 export const sendEmail = async (
   to: string,
@@ -31,16 +51,42 @@ export const sendEmail = async (
   html: string,
   fromName = defaultFromName
 ) => {
-  const from = `"${fromName}" <${defaultFromEmail}>`;
+  if (!isUnisenderConfigured()) {
+    throw new Error('Unisender API is not configured');
+  }
 
-  await mailTransporter.sendMail({
-    from,
-    to,
+  const body = new URLSearchParams({
+    format: 'json',
+    api_key: unisenderApiKey,
+    email: to,
+    sender_name: fromName,
+    sender_email: defaultFromEmail,
     subject,
-    html,
+    body: html,
+    list_id: unisenderListId,
+    error_checking: '1',
   });
 
-  logger.info('Email sent', { to, subject });
+  const response = await fetch(unisenderApiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  const payload = await parseUnisenderResponse(response);
+
+  if (Array.isArray(payload.result)) {
+    const firstResult = payload.result[0] as { errors?: { message?: string }[] } | undefined;
+    const firstError = firstResult?.errors?.[0]?.message;
+
+    if (firstError) {
+      throw new Error(firstError);
+    }
+  }
+
+  logger.info('Email sent via Unisender API', { to, subject });
   return true;
 };
 
@@ -49,26 +95,37 @@ export const verifyMailConnection = async (): Promise<void> => {
 
   if (!isMailConfigured()) {
     mailConnectionStatus = 'not_configured';
-    mailConnectionMessage = 'SMTP credentials are not configured';
+    mailConnectionMessage = 'Unisender API credentials are not configured';
     return;
   }
 
   try {
-    await mailTransporter.verify();
+    const body = new URLSearchParams({
+      format: 'json',
+      api_key: unisenderApiKey,
+    });
+
+    const response = await fetch(getUnisenderListsUrl(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
+
+    await parseUnisenderResponse(response);
     mailConnectionStatus = 'ok';
     mailConnectionMessage = null;
-    logger.info('SMTP connection verified', {
-      host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
-      port: smtpPort,
-      secure: smtpSecure,
+    logger.info('Unisender API connection verified', {
+      provider: unisenderProviderName,
+      endpoint: unisenderApiUrl,
     });
   } catch (error) {
     mailConnectionStatus = 'error';
     mailConnectionMessage = error instanceof Error ? error.message : String(error);
-    logger.error('SMTP connection verification failed', {
-      host: process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io',
-      port: smtpPort,
-      secure: smtpSecure,
+    logger.error('Unisender API connection verification failed', {
+      provider: unisenderProviderName,
+      endpoint: unisenderApiUrl,
       error: mailConnectionMessage,
     });
   }
@@ -76,6 +133,7 @@ export const verifyMailConnection = async (): Promise<void> => {
 
 export const getMailHealth = () => ({
   configured: isMailConfigured(),
+  provider: isMailConfigured() ? unisenderProviderName : null,
   status: mailConnectionStatus,
   checkedAt: mailConnectionCheckedAt,
   message: mailConnectionMessage,
