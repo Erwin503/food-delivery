@@ -26,6 +26,7 @@ const router = Router();
  *       type: object
  *       required:
  *         - dishId
+ *         - dishName
  *         - categoryId
  *         - qty
  *         - priceCents
@@ -36,6 +37,9 @@ const router = Router();
  *       properties:
  *         dishId:
  *           type: integer
+ *         dishName:
+ *           type: string
+ *           example: Маргарита
  *         categoryId:
  *           type: integer
  *         qty:

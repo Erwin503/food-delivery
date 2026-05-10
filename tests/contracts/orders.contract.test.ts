@@ -93,6 +93,7 @@ test('GET /api/orders/my returns all current user orders including a soft-delete
     assert.equal(payload.some((order: { id: number }) => order.id === 1), true);
     assert.equal(Array.isArray(payload[0].items), true);
     assert.equal(payload.every((order: { items: unknown[] }) => Array.isArray(order.items)), true);
+    assert.equal(typeof payload[0].items[0]?.dishName, 'string');
     assert.equal(payload.find((order: { id: number }) => order.id === 1)?.updatedAt !== null, true);
     assert.equal(payload[0].createdAt >= payload[1].createdAt, true);
   } finally {

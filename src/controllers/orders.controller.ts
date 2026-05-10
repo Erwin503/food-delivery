@@ -87,7 +87,11 @@ type PricedOrderItem = OrderPricingSource & {
   lineTotalCents: number;
 };
 
-const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
+type OrderItemWithDishName = OrderItemModel & {
+  dish_name: string;
+};
+
+const toOrderDto = (order: OrderModel, items?: OrderItemWithDishName[]) => ({
   id: order.id,
   orderNumber: order.order_number,
   userId: order.user_id,
@@ -104,6 +108,7 @@ const toOrderDto = (order: OrderModel, items?: OrderItemModel[]) => ({
   updatedAt: toNullableIsoString(order.updated_at),
   items: items?.map((item) => ({
     dishId: item.dish_id,
+    dishName: item.dish_name,
     categoryId: item.category_id,
     qty: item.qty,
     priceCents: item.price_cents,
@@ -125,48 +130,52 @@ const loadOrderById = async (id: number): Promise<OrderModel | undefined> =>
     .whereNull('deleted_at')
     .first();
 
-const loadOrderItems = async (orderId: number): Promise<OrderItemModel[]> =>
-  db<OrderItemModel>('order_items')
+const loadOrderItems = async (orderId: number): Promise<OrderItemWithDishName[]> =>
+  db<OrderItemModel>('order_items as oi')
+    .join('dishes as d', 'd.id', 'oi.dish_id')
     .select(
-      'order_id',
-      'dish_id',
-      'category_id',
-      'qty',
-      'price_cents',
-      'base_price_cents',
-      'discount_price_cents',
-      'discounted_qty',
-      'line_total_cents',
-      'created_at',
-      'updated_at'
+      'oi.order_id',
+      'oi.dish_id',
+      'oi.category_id',
+      'oi.qty',
+      'oi.price_cents',
+      'oi.base_price_cents',
+      'oi.discount_price_cents',
+      'oi.discounted_qty',
+      'oi.line_total_cents',
+      'oi.created_at',
+      'oi.updated_at',
+      'd.name as dish_name'
     )
-    .where({ order_id: orderId })
-    .orderBy('dish_id', 'asc');
+    .where({ 'oi.order_id': orderId })
+    .orderBy('oi.dish_id', 'asc') as unknown as Promise<OrderItemWithDishName[]>;
 
-const loadOrderItemsByOrderIds = async (orderIds: number[]): Promise<Map<number, OrderItemModel[]>> => {
+const loadOrderItemsByOrderIds = async (orderIds: number[]): Promise<Map<number, OrderItemWithDishName[]>> => {
   if (orderIds.length === 0) {
     return new Map();
   }
 
-  const items = await db<OrderItemModel>('order_items')
+  const items = await db<OrderItemModel>('order_items as oi')
+    .join('dishes as d', 'd.id', 'oi.dish_id')
     .select(
-      'order_id',
-      'dish_id',
-      'category_id',
-      'qty',
-      'price_cents',
-      'base_price_cents',
-      'discount_price_cents',
-      'discounted_qty',
-      'line_total_cents',
-      'created_at',
-      'updated_at'
+      'oi.order_id',
+      'oi.dish_id',
+      'oi.category_id',
+      'oi.qty',
+      'oi.price_cents',
+      'oi.base_price_cents',
+      'oi.discount_price_cents',
+      'oi.discounted_qty',
+      'oi.line_total_cents',
+      'oi.created_at',
+      'oi.updated_at',
+      'd.name as dish_name'
     )
-    .whereIn('order_id', orderIds)
-    .orderBy('order_id', 'asc')
-    .orderBy('dish_id', 'asc');
+    .whereIn('oi.order_id', orderIds)
+    .orderBy('oi.order_id', 'asc')
+    .orderBy('oi.dish_id', 'asc') as unknown as OrderItemWithDishName[];
 
-  const itemsByOrderId = new Map<number, OrderItemModel[]>();
+  const itemsByOrderId = new Map<number, OrderItemWithDishName[]>();
 
   for (const item of items) {
     const bucket = itemsByOrderId.get(item.order_id) ?? [];
