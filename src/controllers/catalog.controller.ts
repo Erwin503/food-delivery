@@ -167,7 +167,7 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
       updated_at: new Date(),
     };
 
-    if ('name' in req.body) {
+    if (req.body.name !== undefined) {
       const name = String(req.body.name || '').trim();
 
       if (!name) {
@@ -177,7 +177,7 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
       patch.name = name;
     }
 
-    if ('sortOrder' in req.body) {
+    if (req.body.sortOrder !== undefined) {
       const sortOrder = Number(req.body.sortOrder);
 
       if (!Number.isFinite(sortOrder)) {
@@ -364,7 +364,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       updated_at: new Date(),
     };
 
-    if ('categoryId' in req.body) {
+    if (req.body.categoryId !== undefined) {
       const categoryId = Number(req.body.categoryId);
 
       if (!categoryId) {
@@ -375,7 +375,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.category_id = categoryId;
     }
 
-    if ('name' in req.body) {
+    if (req.body.name !== undefined) {
       const name = String(req.body.name || '').trim();
 
       if (!name) {
@@ -385,7 +385,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.name = name;
     }
 
-    if ('description' in req.body) {
+    if (req.body.description !== undefined) {
       patch.description = req.body.description ?? null;
     }
 
@@ -393,7 +393,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.image_url = buildUploadedFileUrl(req.file.filename);
     }
 
-    if ('basePriceCents' in req.body) {
+    if (req.body.basePriceCents !== undefined) {
       const basePriceCents = Number(req.body.basePriceCents);
 
       if (!Number.isFinite(basePriceCents)) {
@@ -403,7 +403,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.base_price_cents = basePriceCents;
     }
 
-    if ('discountPriceCents' in req.body) {
+    if (req.body.discountPriceCents !== undefined) {
       const discountPriceCents = Number(req.body.discountPriceCents);
 
       if (!Number.isFinite(discountPriceCents)) {
@@ -413,7 +413,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.discount_price_cents = discountPriceCents;
     }
 
-    if ('isActive' in req.body) {
+    if (req.body.isActive !== undefined) {
       patch.is_active = Boolean(req.body.isActive);
     }
 

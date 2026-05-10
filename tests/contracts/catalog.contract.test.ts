@@ -105,6 +105,30 @@ test('PUT /api/categories/:id partially updates a category', async () => {
   }
 });
 
+test('PUT /api/categories/:id ignores omitted fields and keeps current values', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const before = await db('categories').where({ id: 2 }).first();
+
+    const response = await fetch(`${baseUrl}/api/categories/2`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.name, before.name);
+    assert.equal(payload.sortOrder, before.sort_order);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('DELETE /api/categories/:id deletes or archives a category', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -243,6 +267,31 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
     assert.equal(payload.basePriceCents, 13900);
     assert.equal(payload.discountPriceCents, 11900);
     assert.equal(payload.isActive, true);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('PUT /api/dishes/:id ignores omitted fields and keeps current values', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const before = await db('dishes').where({ id: 5 }).first();
+
+    const response = await fetch(`${baseUrl}/api/dishes/5`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.name, before.name);
+    assert.equal(payload.basePriceCents, before.base_price_cents);
+    assert.equal(payload.discountPriceCents, before.discount_price_cents);
   } finally {
     await stopTestServer(server);
   }

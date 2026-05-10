@@ -177,7 +177,7 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     const departureAt = req.body.departureAt;
     const orderAcceptanceEndsAt = req.body.orderAcceptanceEndsAt;
 
-    if (departureAt || orderAcceptanceEndsAt) {
+    if (departureAt !== undefined || orderAcceptanceEndsAt !== undefined) {
       const current = await requireRoute(routeId);
       validateRouteTimes(
         String(departureAt ?? current.departure_at),
@@ -185,23 +185,23 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
       );
     }
 
-    if ('name' in req.body) {
+    if (req.body.name !== undefined) {
       patch.name = req.body.name;
     }
-    if ('departureAt' in req.body) {
+    if (departureAt !== undefined) {
       patch.departure_at = toSqlDateTime(req.body.departureAt);
     }
-    if ('orderAcceptanceEndsAt' in req.body) {
+    if (orderAcceptanceEndsAt !== undefined) {
       patch.order_acceptance_ends_at = toSqlDateTime(req.body.orderAcceptanceEndsAt);
     }
-    if ('description' in req.body) {
+    if (req.body.description !== undefined) {
       patch.description = req.body.description ?? null;
     }
 
     await db.transaction(async (trx) => {
       await trx('routes').where({ id: routeId }).update(patch);
 
-      if (Array.isArray(req.body.companyIds)) {
+      if (req.body.companyIds !== undefined && Array.isArray(req.body.companyIds)) {
         await trx('route_companies').where({ route_id: routeId }).delete();
 
         if (req.body.companyIds.length > 0) {

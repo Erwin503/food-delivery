@@ -114,6 +114,34 @@ test('PUT /api/routes/:id updates route fields', async () => {
   }
 });
 
+test('PUT /api/routes/:id ignores omitted fields and keeps current values', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const before = await db('routes').where({ id: 2 }).first();
+
+    const response = await fetch(`${baseUrl}/api/routes/2`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.name, before.name);
+    assert.equal(payload.departureAt, new Date(before.departure_at).toISOString());
+    assert.equal(
+      payload.orderAcceptanceEndsAt,
+      new Date(before.order_acceptance_ends_at).toISOString()
+    );
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('DELETE /api/routes/:id deletes or archives a route', async () => {
   const { server, baseUrl } = await startTestServer();
 
