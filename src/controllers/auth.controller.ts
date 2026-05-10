@@ -51,9 +51,10 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
+    const fullName = String(req.body.fullName || '').trim();
 
-    if (!email || password.length < 6) {
-      throw new AppError('Email and password with at least 6 characters are required', 400);
+    if (!email || !fullName || password.length < 6) {
+      throw new AppError('Email, fullName, and password with at least 6 characters are required', 400);
     }
 
     const existingUser = await loadUserByEmail(email);
@@ -73,7 +74,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
         company_id: null,
         password_hash: await hashPassword(password),
         email_verified_at: null,
-        full_name: null,
+        full_name: fullName,
         phone: null,
         avatar_url: null,
         order_limit_cents: 0,

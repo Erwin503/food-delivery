@@ -22,6 +22,7 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: 'brand.new@cook.local',
+        fullName: 'Brand New',
         password: 'Password123!',
       }),
     });
@@ -32,6 +33,7 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
     const user = await db('users').where({ email: 'brand.new@cook.local' }).first();
     assert.ok(user);
     assert.equal(user.email_verified_at, null);
+    assert.equal(user.full_name, 'Brand New');
 
     const code = await db('auth_email_verification_codes')
       .where({ email: 'brand.new@cook.local' })
@@ -53,6 +55,7 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: 'new.signup.confirm@cook.local',
+        fullName: 'Confirm User',
         password: 'Password123!',
       }),
     });
@@ -80,6 +83,7 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
 
     const user = await db('users').where({ email: 'new.signup.confirm@cook.local' }).first();
     assert.ok(user.email_verified_at);
+    assert.equal(user.full_name, 'Confirm User');
   } finally {
     await stopTestServer(server);
   }

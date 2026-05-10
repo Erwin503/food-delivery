@@ -217,11 +217,15 @@ const router = Router();
  *       type: object
  *       required:
  *         - email
+ *         - fullName
  *         - password
  *       properties:
  *         email:
  *           type: string
  *           format: email
+ *         fullName:
+ *           type: string
+ *           example: Ivan Ivanov
  *         password:
  *           type: string
  *           format: password
