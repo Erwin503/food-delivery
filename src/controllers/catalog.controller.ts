@@ -31,6 +31,9 @@ type CompanySubscriptionRow = Pick<CompanyModel, 'id' | 'subscription_expires_at
 const hasActiveSubscription = (company?: CompanySubscriptionRow | null): boolean =>
   Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
 
+const isOmittedValue = (value: unknown): boolean =>
+  value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
 const toCategoryDto = (category: CategoryRow) => ({
   id: category.id,
   name: category.name,
@@ -167,7 +170,7 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
       updated_at: new Date(),
     };
 
-    if (req.body.name !== undefined) {
+    if (!isOmittedValue(req.body.name)) {
       const name = String(req.body.name || '').trim();
 
       if (!name) {
@@ -177,7 +180,7 @@ export const updateCategory = async (req: Request, res: Response, next: NextFunc
       patch.name = name;
     }
 
-    if (req.body.sortOrder !== undefined) {
+    if (!isOmittedValue(req.body.sortOrder)) {
       const sortOrder = Number(req.body.sortOrder);
 
       if (!Number.isFinite(sortOrder)) {
@@ -364,7 +367,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       updated_at: new Date(),
     };
 
-    if (req.body.categoryId !== undefined) {
+    if (!isOmittedValue(req.body.categoryId)) {
       const categoryId = Number(req.body.categoryId);
 
       if (!categoryId) {
@@ -375,7 +378,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.category_id = categoryId;
     }
 
-    if (req.body.name !== undefined) {
+    if (!isOmittedValue(req.body.name)) {
       const name = String(req.body.name || '').trim();
 
       if (!name) {
@@ -393,7 +396,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.image_url = buildUploadedFileUrl(req.file.filename);
     }
 
-    if (req.body.basePriceCents !== undefined) {
+    if (!isOmittedValue(req.body.basePriceCents)) {
       const basePriceCents = Number(req.body.basePriceCents);
 
       if (!Number.isFinite(basePriceCents)) {
@@ -403,7 +406,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.base_price_cents = basePriceCents;
     }
 
-    if (req.body.discountPriceCents !== undefined) {
+    if (!isOmittedValue(req.body.discountPriceCents)) {
       const discountPriceCents = Number(req.body.discountPriceCents);
 
       if (!Number.isFinite(discountPriceCents)) {
@@ -413,7 +416,7 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
       patch.discount_price_cents = discountPriceCents;
     }
 
-    if (req.body.isActive !== undefined) {
+    if (!isOmittedValue(req.body.isActive)) {
       patch.is_active = Boolean(req.body.isActive);
     }
 

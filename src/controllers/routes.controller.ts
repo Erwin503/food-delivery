@@ -21,6 +21,9 @@ const routeColumns = [
 
 const companyColumns = ['id', 'name'] as const;
 
+const isOmittedValue = (value: unknown): boolean =>
+  value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
 const toSqlDateTime = (value: string | Date): string => {
   const date = new Date(value);
 
@@ -177,21 +180,21 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     const departureAt = req.body.departureAt;
     const orderAcceptanceEndsAt = req.body.orderAcceptanceEndsAt;
 
-    if (departureAt !== undefined || orderAcceptanceEndsAt !== undefined) {
+    if (!isOmittedValue(departureAt) || !isOmittedValue(orderAcceptanceEndsAt)) {
       const current = await requireRoute(routeId);
       validateRouteTimes(
-        String(departureAt ?? current.departure_at),
-        String(orderAcceptanceEndsAt ?? current.order_acceptance_ends_at)
+        String(isOmittedValue(departureAt) ? current.departure_at : departureAt),
+        String(isOmittedValue(orderAcceptanceEndsAt) ? current.order_acceptance_ends_at : orderAcceptanceEndsAt)
       );
     }
 
-    if (req.body.name !== undefined) {
+    if (!isOmittedValue(req.body.name)) {
       patch.name = req.body.name;
     }
-    if (departureAt !== undefined) {
+    if (!isOmittedValue(departureAt)) {
       patch.departure_at = toSqlDateTime(req.body.departureAt);
     }
-    if (orderAcceptanceEndsAt !== undefined) {
+    if (!isOmittedValue(orderAcceptanceEndsAt)) {
       patch.order_acceptance_ends_at = toSqlDateTime(req.body.orderAcceptanceEndsAt);
     }
     if (req.body.description !== undefined) {
@@ -201,7 +204,7 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     await db.transaction(async (trx) => {
       await trx('routes').where({ id: routeId }).update(patch);
 
-      if (req.body.companyIds !== undefined && Array.isArray(req.body.companyIds)) {
+      if (!isOmittedValue(req.body.companyIds) && Array.isArray(req.body.companyIds)) {
         await trx('route_companies').where({ route_id: routeId }).delete();
 
         if (req.body.companyIds.length > 0) {
