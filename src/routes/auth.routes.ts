@@ -206,6 +206,10 @@ const router = Router();
  *           enum: [employee, manager, admin]
  *     ErrorResponse:
  *       type: object
+ *       required:
+ *         - status
+ *         - message
+ *         - error
  *       properties:
  *         status:
  *           type: string
@@ -213,6 +217,22 @@ const router = Router();
  *         message:
  *           type: string
  *           example: Invalid email or password
+ *         error:
+ *           type: object
+ *           required:
+ *             - message
+ *             - code
+ *             - statusCode
+ *           properties:
+ *             message:
+ *               type: string
+ *               example: Invalid email or password
+ *             code:
+ *               type: string
+ *               example: HTTP_401
+ *             statusCode:
+ *               type: integer
+ *               example: 401
  *     SignupRequest:
  *       type: object
  *       required:
@@ -263,8 +283,18 @@ const router = Router();
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/LoginStep1Response'
+ *       400:
+ *         description: Email, fullName, or password is missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
  *         description: User already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/signup', signup);
 
@@ -287,8 +317,24 @@ router.post('/signup', signup);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/AuthTokenResponse'
+ *       400:
+ *         description: Email or code is missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid or expired verification code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found after verification
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/signup/confirm', confirmSignup);
 
@@ -311,6 +357,12 @@ router.post('/signup/confirm', confirmSignup);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/LoginStep1Response'
+ *       400:
+ *         description: Email is required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/login/step1', loginStep1);
 
@@ -333,8 +385,24 @@ router.post('/login/step1', loginStep1);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/AuthTokenResponse'
+ *       400:
+ *         description: Email or code is missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid or expired code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found after login confirmation
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/login/step2', loginStep2);
 
@@ -357,8 +425,18 @@ router.post('/login/step2', loginStep2);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/AuthTokenResponse'
+ *       400:
+ *         description: Email or password is missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/login/password', passwordLogin);
 
@@ -379,6 +457,10 @@ router.post('/login/password', passwordLogin);
  *               $ref: '#/components/schemas/User'
  *       401:
  *         description: Missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/profile', authenticateToken, getProfile);
 
@@ -406,6 +488,12 @@ router.get('/profile', authenticateToken, getProfile);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.put('/profile', authenticateToken, avatarImageUpload.single('avatar'), updateProfile);
 
@@ -420,6 +508,12 @@ router.put('/profile', authenticateToken, avatarImageUpload.single('avatar'), up
  *     responses:
  *       204:
  *         description: Profile deleted
+ *       401:
+ *         description: Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.delete('/profile', authenticateToken, deleteProfile);
 
@@ -444,8 +538,18 @@ router.delete('/profile', authenticateToken, deleteProfile);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/User'
+ *       400:
+ *         description: New password is too short
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Current password is incorrect
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.put('/password', authenticateToken, setPassword);
 
@@ -468,6 +572,12 @@ router.put('/password', authenticateToken, setPassword);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/LoginStep1Response'
+ *       400:
+ *         description: Email is required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/password/reset/request', requestPasswordReset);
 
@@ -490,8 +600,24 @@ router.post('/password/reset/request', requestPasswordReset);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/AuthTokenResponse'
+ *       400:
+ *         description: Email, code, or newPassword is missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid or expired reset code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/password/reset/confirm', confirmPasswordReset);
 
@@ -516,8 +642,24 @@ router.post('/password/reset/confirm', confirmPasswordReset);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/User'
+ *       400:
+ *         description: userId or role is missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  *       403:
  *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/promote', authenticateToken, checkRole(['admin']), promoteUser);
 
@@ -540,7 +682,11 @@ router.post('/promote', authenticateToken, checkRole(['admin']), promoteUser);
  *                 $ref: '#/components/schemas/User'
  *       403:
  *         description: Forbidden
- */
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+*/
 router.get('/all', authenticateToken, checkRole(['admin']), getAllUsers);
 
 export default router;
