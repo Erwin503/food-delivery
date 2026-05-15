@@ -292,6 +292,26 @@ test('PUT /api/auth/profile updates profile and uploads avatar for current user'
   }
 });
 
+test('PUT /api/auth/push-token saves Firebase token for current user', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const token = generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
+    const response = await fetch(`${baseUrl}/api/auth/push-token`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firebaseToken: 'firebase-device-token-123' }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const user = await db('users').where({ id: 4 }).first();
+    assert.equal(user.firebase_token, 'firebase-device-token-123');
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test('PUT /api/auth/password sets a new password for the current user', async () => {
   const { server, baseUrl } = await startTestServer();
 

@@ -9,6 +9,7 @@ import { logRequests } from './middleware/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
 import db from './db/knex';
+import { getFirebaseHealth } from './utils/firebaseService';
 import { getMailHealth } from './utils/mailService';
 
 export const createApp = () => {
@@ -62,6 +63,7 @@ export const createApp = () => {
         environment: process.env.NODE_ENV || 'development',
         timestamp: new Date().toISOString(),
         mail: getMailHealth(),
+        push: getFirebaseHealth(),
       });
     } catch (error) {
       next(error);

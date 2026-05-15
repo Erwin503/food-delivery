@@ -318,6 +318,27 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
   }
 };
 
+export const updatePushToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const user = await requireAuthenticatedUser(req.user);
+    const firebaseTokenRaw = req.body.firebaseToken;
+    const firebaseToken =
+      firebaseTokenRaw === null || firebaseTokenRaw === undefined
+        ? null
+        : String(firebaseTokenRaw).trim() || null;
+
+    await db('users').where({ id: user.id }).update({
+      firebase_token: firebaseToken,
+      updated_at: new Date(),
+    });
+
+    const updatedUser = await requireAuthenticatedUser(req.user);
+    res.json(toUserDto(updatedUser));
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const setPassword = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = await requireAuthenticatedUser(req.user);

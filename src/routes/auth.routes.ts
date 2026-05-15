@@ -13,6 +13,7 @@ import {
   setPassword,
   signup,
   updateProfile,
+  updatePushToken,
 } from '../controllers/auth.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
@@ -170,6 +171,14 @@ const router = Router();
  *           type: string
  *           format: binary
  *           description: Image file in jpeg, png, webp, or gif format, up to 5 MB
+ *     UpdatePushTokenRequest:
+ *       type: object
+ *       properties:
+ *         firebaseToken:
+ *           type: string
+ *           nullable: true
+ *           example: eXamplEFcmT0ken123
+ *           description: Firebase registration token. Pass null or empty string to clear it.
  *     SetPasswordRequest:
  *       type: object
  *       required:
@@ -536,6 +545,36 @@ router.get('/profile', authenticateToken, getProfile);
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.put('/profile', authenticateToken, avatarImageUpload.single('avatar'), updateProfile);
+
+/**
+ * @swagger
+ * /auth/push-token:
+ *   put:
+ *     summary: Save or clear current user Firebase push token
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdatePushTokenRequest'
+ *     responses:
+ *       200:
+ *         description: Updated user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.put('/push-token', authenticateToken, updatePushToken);
 
 /**
  * @swagger

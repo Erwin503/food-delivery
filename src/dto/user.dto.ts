@@ -27,3 +27,7 @@ export interface PromoteUserDto {
   userId: number;
   role: UserRole;
 }
+
+export interface UpdatePushTokenDto {
+  firebaseToken?: string | null;
+}

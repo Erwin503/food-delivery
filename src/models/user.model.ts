@@ -12,6 +12,7 @@ export interface UserModel extends SoftDeleteColumns {
   full_name: string | null;
   phone: string | null;
   avatar_url: string | null;
+  firebase_token: string | null;
   order_limit_cents: number;
   debt_cents: number;
   subscription_started_at?: string | Date | null;
