@@ -9,7 +9,7 @@ import {
 } from '../models';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildUploadedAvatarUrl } from '../middleware/uploadMiddleware';
-import { generateLoginCode, generateTemporaryPassword } from '../utils/auth';
+import { generateLoginCode } from '../utils/auth';
 import { generateToken } from '../utils/generateToken';
 import { isMailConfigured, queueEmail } from '../utils/mailService';
 import { comparePassword, hashPassword } from '../utils/password';
@@ -59,30 +59,38 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 
     const existingUser = await loadUserByEmail(email);
 
-    if (existingUser) {
-      throw new AppError('User with this email already exists', 409);
-    }
-
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + EMAIL_VERIFICATION_TTL_SECONDS * 1000);
     const verificationCode = generateLoginCode();
 
     await db.transaction(async (trx) => {
-      await trx('users').insert({
-        email,
-        role: 'employee',
-        company_id: null,
-        password_hash: await hashPassword(password),
-        email_verified_at: null,
-        full_name: fullName,
-        phone: null,
-        avatar_url: null,
-        order_limit_cents: 0,
-        debt_cents: 0,
-        created_at: createdAt,
-        updated_at: createdAt,
-        deleted_at: null,
-      });
+      if (existingUser) {
+        if (existingUser.email_verified_at) {
+          throw new AppError('User with this email already exists', 409);
+        }
+
+        await trx('users').where({ id: existingUser.id }).update({
+          password_hash: await hashPassword(password),
+          full_name: fullName,
+          updated_at: createdAt,
+        });
+      } else {
+        await trx('users').insert({
+          email,
+          role: 'employee',
+          company_id: null,
+          password_hash: await hashPassword(password),
+          email_verified_at: null,
+          full_name: fullName,
+          phone: null,
+          avatar_url: null,
+          order_limit_cents: 0,
+          debt_cents: 0,
+          created_at: createdAt,
+          updated_at: createdAt,
+          deleted_at: null,
+        });
+      }
 
       await trx('auth_email_verification_codes').insert({
         email,
@@ -164,31 +172,21 @@ export const loginStep1 = async (req: Request, res: Response, next: NextFunction
       throw new AppError('Email is required', 400);
     }
 
+    const existingUser = await loadUserByEmail(email);
+
+    if (!existingUser) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!existingUser.email_verified_at) {
+      throw new AppError('Email is not verified', 403);
+    }
+
     const code = generateLoginCode();
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + LOGIN_CODE_TTL_SECONDS * 1000);
-    const existingUser = await loadUserByEmail(email);
-    const temporaryPassword = existingUser ? null : generateTemporaryPassword();
 
     await db.transaction(async (trx) => {
-      if (!existingUser) {
-        await trx('users').insert({
-          email,
-          role: 'employee',
-          company_id: null,
-          password_hash: await hashPassword(temporaryPassword as string),
-          email_verified_at: null,
-          full_name: null,
-          phone: null,
-          avatar_url: null,
-          order_limit_cents: 0,
-          debt_cents: 0,
-          created_at: createdAt,
-          updated_at: createdAt,
-          deleted_at: null,
-        });
-      }
-
       await trx('auth_login_codes').insert({
         email,
         code,
@@ -200,10 +198,8 @@ export const loginStep1 = async (req: Request, res: Response, next: NextFunction
 
     sendEmailIfConfigured(
       email,
-      temporaryPassword ? 'Your login code and temporary password' : 'Your login code',
-      temporaryPassword
-        ? `<p>Your verification code is <strong>${code}</strong>.</p><p>Your temporary password is <strong>${temporaryPassword}</strong>.</p>`
-        : `<p>Your verification code is <strong>${code}</strong>.</p>`
+      'Your login code',
+      `<p>Your verification code is <strong>${code}</strong>.</p>`
     );
 
     res.json({
@@ -238,45 +234,21 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
       throw new AppError('Code expired', 401);
     }
 
+    const user = await loadUserByEmail(email);
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!user.email_verified_at) {
+      throw new AppError('Email is not verified', 403);
+    }
+
     const verifiedAt = new Date();
 
     await db('auth_login_codes').where({ id: loginCode.id }).update({
       consumed_at: verifiedAt,
     });
-
-    let user = await loadUserByEmail(email);
-
-    if (!user) {
-      const temporaryPassword = generateTemporaryPassword();
-      const inserted = await db('users').insert({
-        email,
-        role: 'employee',
-        company_id: null,
-        password_hash: await hashPassword(temporaryPassword),
-        email_verified_at: verifiedAt,
-        full_name: null,
-        phone: null,
-        avatar_url: null,
-        order_limit_cents: 0,
-        debt_cents: 0,
-        created_at: verifiedAt,
-        updated_at: verifiedAt,
-        deleted_at: null,
-      });
-
-      const userId = Array.isArray(inserted) ? Number(inserted[0]) : Number(inserted);
-      user = await loadUserById(userId);
-    } else if (!user.email_verified_at) {
-      await db('users').where({ id: user.id }).update({
-        email_verified_at: verifiedAt,
-        updated_at: verifiedAt,
-      });
-      user = await loadUserById(user.id);
-    }
-
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
 
     issueAuthResponse(res, user);
   } catch (error) {
@@ -297,6 +269,10 @@ export const passwordLogin = async (req: Request, res: Response, next: NextFunct
 
     if (!user || !(await comparePassword(password, user.password_hash))) {
       throw new AppError('Invalid email or password', 401);
+    }
+
+    if (!user.email_verified_at) {
+      throw new AppError('Email is not verified', 403);
     }
 
     issueAuthResponse(res, user);

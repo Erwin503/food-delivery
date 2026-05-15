@@ -17,7 +17,7 @@ export const getJwtSecret = (): string => {
 export const getJwtExpiresIn = (): string => process.env.JWT_EXPIRES_IN?.trim() || '1h';
 
 export const generateLoginCode = (): string =>
-  randomInt(100000, 1000000).toString();
+  randomInt(1000, 10000).toString();
 
 const temporaryPasswordAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
 

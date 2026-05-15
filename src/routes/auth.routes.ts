@@ -284,7 +284,7 @@ const router = Router();
  * @swagger
  * /auth/signup:
  *   post:
- *     summary: Create account with the same credentials used for password login
+ *     summary: Create account or restart signup for an unverified email
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -306,7 +306,7 @@ const router = Router();
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: User already exists
+ *         description: Verified user already exists
  *         content:
  *           application/json:
  *             schema:
@@ -358,7 +358,7 @@ router.post('/signup/confirm', authCodeConfirmLimiter, confirmSignup);
  * @swagger
  * /auth/login/step1:
  *   post:
- *     summary: Request a one-time login code by email and create a new employee with a temporary password if needed
+ *     summary: Request a one-time login code by email for a verified user
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -375,6 +375,18 @@ router.post('/signup/confirm', authCodeConfirmLimiter, confirmSignup);
  *               $ref: '#/components/schemas/LoginStep1Response'
  *       400:
  *         description: Email is required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Email is not verified
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: User not found
  *         content:
  *           application/json:
  *             schema:
@@ -409,6 +421,12 @@ router.post('/login/step1', authCodeRequestLimiter, loginStep1);
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid or expired code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Email is not verified
  *         content:
  *           application/json:
  *             schema:
@@ -449,6 +467,12 @@ router.post('/login/step2', authCodeConfirmLimiter, loginStep2);
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Email is not verified
  *         content:
  *           application/json:
  *             schema:

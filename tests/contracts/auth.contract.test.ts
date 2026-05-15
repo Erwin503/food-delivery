@@ -40,7 +40,61 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
       .orderBy('id', 'desc')
       .first();
     assert.ok(code);
-    assert.equal(String(code.code).length, 6);
+    assert.equal(String(code.code).length, 4);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/auth/signup updates an existing unverified user and issues a fresh verification code', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const firstResponse = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'retry.signup@cook.local',
+        fullName: 'First Name',
+        password: 'Password123!',
+      }),
+    });
+
+    assert.equal(firstResponse.status, 201);
+
+    const userBeforeRetry = await db('users').where({ email: 'retry.signup@cook.local' }).first();
+    const firstCode = await db('auth_email_verification_codes')
+      .where({ email: 'retry.signup@cook.local' })
+      .orderBy('id', 'desc')
+      .first();
+
+    assert.ok(userBeforeRetry);
+    assert.ok(firstCode);
+
+    const secondResponse = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'retry.signup@cook.local',
+        fullName: 'Second Name',
+        password: 'NewPassword123!',
+      }),
+    });
+
+    assert.equal(secondResponse.status, 201);
+
+    const users = await db('users').where({ email: 'retry.signup@cook.local' });
+    const userAfterRetry = users[0];
+    const secondCode = await db('auth_email_verification_codes')
+      .where({ email: 'retry.signup@cook.local' })
+      .orderBy('id', 'desc')
+      .first();
+
+    assert.equal(users.length, 1);
+    assert.equal(userAfterRetry.full_name, 'Second Name');
+    assert.notEqual(userAfterRetry.password_hash, userBeforeRetry.password_hash);
+    assert.notEqual(secondCode.id, firstCode.id);
+    assert.equal(String(secondCode.code).length, 4);
   } finally {
     await stopTestServer(server);
   }
@@ -66,7 +120,7 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
       .orderBy('id', 'desc')
       .first();
     assert.ok(verificationCode);
-    assert.equal(String(verificationCode.code).length, 6);
+    assert.equal(String(verificationCode.code).length, 4);
 
     const response = await fetch(`${baseUrl}/api/auth/signup/confirm`, {
       method: 'POST',
@@ -89,32 +143,80 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
   }
 });
 
-test('POST /api/auth/login/step1 sends a one-time email code', async () => {
+test('POST /api/auth/login/step1 sends a one-time email code only for a verified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
     const response = await fetch(`${baseUrl}/api/auth/login/step1`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'new.user@cook.local' }),
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local' }),
     });
 
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true, expiresInSeconds: 300 });
 
-    const codeRow = await db('auth_login_codes').where({ email: 'new.user@cook.local' }).orderBy('id', 'desc').first();
+    const codeRow = await db('auth_login_codes').where({ email: 'employee.ivanov@cook.local' }).orderBy('id', 'desc').first();
     assert.ok(codeRow);
-    assert.equal(String(codeRow.code).length, 6);
-
-    const user = await db('users').where({ email: 'new.user@cook.local' }).first();
-    assert.ok(user);
-    assert.ok(user.password_hash);
+    assert.equal(String(codeRow.code).length, 4);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/auth/login/step2 returns JWT and marks email as verified', async () => {
+test('POST /api/auth/login/step1 rejects unknown email', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/auth/login/step1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'missing.user@cook.local' }),
+    });
+
+    assert.equal(response.status, 404);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/auth/login/step1 rejects unverified user', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('users').where({ id: 4 }).update({ email_verified_at: null });
+
+    const response = await fetch(`${baseUrl}/api/auth/login/step1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local' }),
+    });
+
+    assert.equal(response.status, 403);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/auth/login/step2 returns JWT for a verified user with a valid code', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/auth/login/step2`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234' }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.user.email, 'employee.ivanov@cook.local');
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test('POST /api/auth/login/step2 rejects unverified user even with a valid code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -126,18 +228,13 @@ test('POST /api/auth/login/step2 returns JWT and marks email as verified', async
       body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234' }),
     });
 
-    assert.equal(response.status, 200);
-    const payload = await response.json();
-    assert.equal(payload.user.email, 'employee.ivanov@cook.local');
-
-    const user = await db('users').where({ id: 4 }).first();
-    assert.ok(user.email_verified_at);
+    assert.equal(response.status, 403);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/auth/login/password returns JWT and user DTO even if email is not verified', async () => {
+test('POST /api/auth/login/password rejects unverified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -149,9 +246,7 @@ test('POST /api/auth/login/password returns JWT and user DTO even if email is no
       body: JSON.stringify({ email: 'employee.ivanov@cook.local', password: 'Password123!' }),
     });
 
-    assert.equal(response.status, 200);
-    const payload = await response.json();
-    assert.equal(payload.user.email, 'employee.ivanov@cook.local');
+    assert.equal(response.status, 403);
   } finally {
     await stopTestServer(server);
   }
