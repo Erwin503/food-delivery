@@ -518,6 +518,8 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
       delivery_fee_cents: 0,
       discount_cents: 0,
       total_cents: subtotal,
+      company_paid_cents: 0,
+      employee_debt_cents: 0,
       created_at: now,
       updated_at: now,
       deleted_at: null,
@@ -527,16 +529,36 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
     const orderId = Array.isArray(orderInsert) ? Number(orderInsert[0]) : Number(orderInsert);
     createdOrderIds.push(orderId);
 
+    const dishes = await db('dishes')
+      .select('id', 'category_id', 'base_price_cents', 'discount_price_cents')
+      .whereIn(
+        'id',
+        testOrder.items.map((item) => item.dish_id)
+      );
+    const dishesById = new Map(dishes.map((dish) => [Number(dish.id), dish]));
+
     await db('order_items').insert(
-      testOrder.items.map((item) => ({
-        order_id: orderId,
-        dish_id: item.dish_id,
-        qty: item.qty,
-        price_cents: item.price_cents,
-        line_total_cents: item.qty * item.price_cents,
-        created_at: now,
-        updated_at: now,
-      }))
+      testOrder.items.map((item) => {
+        const dish = dishesById.get(item.dish_id);
+
+        if (!dish) {
+          throw new AppError(`Dish ${item.dish_id} not found for report test data`, 500);
+        }
+
+        return {
+          order_id: orderId,
+          dish_id: item.dish_id,
+          category_id: Number(dish.category_id),
+          qty: item.qty,
+          price_cents: item.price_cents,
+          base_price_cents: Number(dish.base_price_cents),
+          discount_price_cents: Number(dish.discount_price_cents),
+          discounted_qty: 0,
+          line_total_cents: item.qty * item.price_cents,
+          created_at: now,
+          updated_at: now,
+        };
+      })
     );
 
     await db<OrderStatusHistoryModel>('order_status_history').insert({
