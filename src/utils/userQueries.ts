@@ -14,6 +14,8 @@ export const USER_COLUMNS = [
   'avatar_url',
   'order_limit_cents',
   'debt_cents',
+  'subscription_started_at',
+  'subscription_expires_at',
   'created_at',
   'updated_at',
   'deleted_at',

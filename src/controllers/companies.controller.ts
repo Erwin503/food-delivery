@@ -25,8 +25,6 @@ const companyColumns = [
   'description',
   'address',
   'debt_cents',
-  'subscription_started_at',
-  'subscription_expires_at',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -37,11 +35,6 @@ const toCompanyDto = (company: CompanyModel) => ({
   description: company.description,
   address: company.address,
   debtCents: company.debt_cents,
-  subscriptionStartedAt: company.subscription_started_at ? toIsoString(company.subscription_started_at) : null,
-  subscriptionExpiresAt: company.subscription_expires_at ? toIsoString(company.subscription_expires_at) : null,
-  hasActiveSubscription:
-    Boolean(company.subscription_expires_at) &&
-    new Date(company.subscription_expires_at as string | Date).getTime() > Date.now(),
   createdAt: toIsoString(company.created_at),
   updatedAt: toIsoString(company.updated_at),
 });
@@ -109,6 +102,9 @@ const addOneMonth = (date: Date): Date => {
   next.setMonth(next.getMonth() + 1);
   return next;
 };
+
+const hasActiveUserSubscription = (user: Pick<UserModel, 'subscription_expires_at'>): boolean =>
+  Boolean(user.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
 
 const requireCompanyMember = async (companyId: number, userId: number): Promise<UserModel> => {
   const user = await requireUserById(userId);
@@ -469,31 +465,33 @@ export const createCompanyJoinCode = async (req: AuthRequest, res: Response, nex
   }
 };
 
-export const purchaseCompanySubscription = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const purchaseCompanyUserSubscription = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const companyId = Number(req.params.id);
+    const companyId = parseRequiredId(req.params.id, 'Company id');
+    const userId = parseRequiredId(req.params.userId, 'User id');
+    const actor = await requireCurrentUser(req);
+    await requireManagerOrAdminForCompany(req, companyId);
+    const targetUser = await requireCompanyMember(companyId, userId);
 
-    if (!companyId) {
-      throw new AppError('Company id is required', 400);
+    if (actor.role === 'manager' && targetUser.role !== 'employee') {
+      throw new AppError('Manager can set subscriptions only for employees of their company', 403);
     }
 
-    const company = await requireManagerOrAdminForCompany(req, companyId);
     const now = new Date();
-    const currentExpiry =
-      company.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > now.getTime()
-        ? new Date(company.subscription_expires_at)
-        : null;
+    const currentExpiry = hasActiveUserSubscription(targetUser)
+      ? new Date(targetUser.subscription_expires_at as string | Date)
+      : null;
     const subscriptionStartedAt = currentExpiry ? new Date(currentExpiry) : now;
     const subscriptionExpiresAt = addOneMonth(subscriptionStartedAt);
 
-    await db('companies').where({ id: companyId }).update({
+    await db('users').where({ id: userId }).update({
       subscription_started_at: subscriptionStartedAt,
       subscription_expires_at: subscriptionExpiresAt,
       updated_at: now,
     });
 
-    const updatedCompany = await requireCompany(companyId);
-    res.json(toCompanyDto(updatedCompany));
+    const updatedUser = await requireUserById(userId);
+    res.json(toUserDto(updatedUser));
   } catch (error) {
     next(error);
   }

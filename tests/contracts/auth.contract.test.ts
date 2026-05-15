@@ -40,7 +40,7 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
       .orderBy('id', 'desc')
       .first();
     assert.ok(code);
-    assert.equal(String(code.code).length, 4);
+    assert.equal(String(code.code).length, 6);
   } finally {
     await stopTestServer(server);
   }
@@ -66,7 +66,7 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
       .orderBy('id', 'desc')
       .first();
     assert.ok(verificationCode);
-    assert.equal(String(verificationCode.code).length, 4);
+    assert.equal(String(verificationCode.code).length, 6);
 
     const response = await fetch(`${baseUrl}/api/auth/signup/confirm`, {
       method: 'POST',
@@ -104,7 +104,7 @@ test('POST /api/auth/login/step1 sends a one-time email code', async () => {
 
     const codeRow = await db('auth_login_codes').where({ email: 'new.user@cook.local' }).orderBy('id', 'desc').first();
     assert.ok(codeRow);
-    assert.equal(String(codeRow.code).length, 4);
+    assert.equal(String(codeRow.code).length, 6);
 
     const user = await db('users').where({ email: 'new.user@cook.local' }).first();
     assert.ok(user);

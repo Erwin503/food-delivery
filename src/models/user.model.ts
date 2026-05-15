@@ -14,4 +14,6 @@ export interface UserModel extends SoftDeleteColumns {
   avatar_url: string | null;
   order_limit_cents: number;
   debt_cents: number;
+  subscription_started_at?: string | Date | null;
+  subscription_expires_at?: string | Date | null;
 }

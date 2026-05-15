@@ -5,6 +5,9 @@ import { generateToken } from '../../src/utils/generateToken';
 import { seed } from '../../seeds/01_demo_data';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
+const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
+  test(name, { concurrency: false }, fn);
+
 const adminToken = () =>
   generateToken({ id: 1, email: 'admin@cook.local', role: 'admin', companyId: null });
 
@@ -18,7 +21,7 @@ test.beforeEach(async () => {
   await seed(db);
 });
 
-test('GET /api/orders returns filtered orders list for admin or manager', async () => {
+serialTest('GET /api/orders returns filtered orders list for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -43,7 +46,7 @@ test('GET /api/orders returns filtered orders list for admin or manager', async 
   }
 });
 
-test('GET /api/orders/:id returns order details with items for owner, manager, or admin', async () => {
+serialTest('GET /api/orders/:id returns order details with items for owner, manager, or admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -60,7 +63,7 @@ test('GET /api/orders/:id returns order details with items for owner, manager, o
   }
 });
 
-test('GET /api/orders/my returns all current user orders including a soft-deleted one and a new one from today', async () => {
+serialTest('GET /api/orders/my returns all current user orders including a soft-deleted one and a new one from today', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -101,7 +104,7 @@ test('GET /api/orders/my returns all current user orders including a soft-delete
   }
 });
 
-test('GET /api/orders/can-create-today shows whether user can create an order today', async () => {
+serialTest('GET /api/orders/can-create-today always allows creating another order', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -113,35 +116,20 @@ test('GET /api/orders/can-create-today shows whether user can create an order to
       cancelled_at: null,
     });
 
-    const busyResponse = await fetch(`${baseUrl}/api/orders/can-create-today`, {
+    const response = await fetch(`${baseUrl}/api/orders/can-create-today`, {
       headers: { Authorization: `Bearer ${employeeToken()}` },
     });
 
-    assert.equal(busyResponse.status, 200);
-    const busyPayload = await busyResponse.json();
-    assert.equal(busyPayload.canCreateOrder, false);
-    assert.equal(busyPayload.existingOrder.id, 1);
-
-    await db('orders').where({ id: 1 }).update({
-      status: 'cancelled',
-      cancelled_at: new Date(),
-      updated_at: new Date(),
-    });
-
-    const freeResponse = await fetch(`${baseUrl}/api/orders/can-create-today`, {
-      headers: { Authorization: `Bearer ${employeeToken()}` },
-    });
-
-    assert.equal(freeResponse.status, 200);
-    const freePayload = await freeResponse.json();
-    assert.equal(freePayload.canCreateOrder, true);
-    assert.equal(freePayload.existingOrder, null);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.canCreateOrder, true);
+    assert.equal(payload.existingOrder, null);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/orders creates a draft order from dishes for employee role', async () => {
+serialTest('POST /api/orders creates a draft order from dishes for employee role', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -172,7 +160,7 @@ test('POST /api/orders creates a draft order from dishes for employee role', asy
   }
 });
 
-test('POST /api/orders/calculate returns total by items without creating an order', async () => {
+serialTest('POST /api/orders/calculate returns total by items without creating an order', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -206,7 +194,7 @@ test('POST /api/orders/calculate returns total by items without creating an orde
   }
 });
 
-test('POST /api/orders/calculate applies subscription discount to only one dish per category', async () => {
+serialTest('POST /api/orders/calculate applies subscription discount to only one dish per category', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -244,7 +232,7 @@ test('POST /api/orders/calculate applies subscription discount to only one dish 
   }
 });
 
-test('POST /api/orders creates a draft order from dishes for manager role in the same company', async () => {
+serialTest('POST /api/orders creates a draft order from dishes for manager role in the same company', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -271,7 +259,7 @@ test('POST /api/orders creates a draft order from dishes for manager role in the
   }
 });
 
-test('PUT /api/orders/:id updates order meta fields for owner or manager', async () => {
+serialTest('PUT /api/orders/:id updates order meta fields for owner or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -294,7 +282,7 @@ test('PUT /api/orders/:id updates order meta fields for owner or manager', async
   }
 });
 
-test('DELETE /api/orders/:id cancels an order for admin or manager', async () => {
+serialTest('DELETE /api/orders/:id cancels an order for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -313,7 +301,7 @@ test('DELETE /api/orders/:id cancels an order for admin or manager', async () =>
   }
 });
 
-test('PUT /api/orders/:id rejects updates after route cutoff time', async () => {
+serialTest('PUT /api/orders/:id rejects updates after route cutoff time', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -338,7 +326,7 @@ test('PUT /api/orders/:id rejects updates after route cutoff time', async () => 
   }
 });
 
-test('DELETE /api/orders/:id rejects cancellation after route cutoff time', async () => {
+serialTest('DELETE /api/orders/:id rejects cancellation after route cutoff time', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -357,7 +345,7 @@ test('DELETE /api/orders/:id rejects cancellation after route cutoff time', asyn
   }
 });
 
-test('POST /api/orders/:id/dishes adds an item and snapshots current dish price', async () => {
+serialTest('POST /api/orders/:id/dishes adds an item and snapshots current dish price', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -382,7 +370,7 @@ test('POST /api/orders/:id/dishes adds an item and snapshots current dish price'
   }
 });
 
-test('PUT /api/orders/:id/dishes changes item quantity for owner or manager', async () => {
+serialTest('PUT /api/orders/:id/dishes changes item quantity for owner or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -406,7 +394,7 @@ test('PUT /api/orders/:id/dishes changes item quantity for owner or manager', as
   }
 });
 
-test('DELETE /api/orders/:id/dishes/:dishId removes an order item', async () => {
+serialTest('DELETE /api/orders/:id/dishes/:dishId removes an order item', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -424,7 +412,7 @@ test('DELETE /api/orders/:id/dishes/:dishId removes an order item', async () => 
   }
 });
 
-test('PATCH /api/orders/:id/status changes order status through allowed transitions', async () => {
+serialTest('PATCH /api/orders/:id/status changes order status through allowed transitions', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -456,7 +444,7 @@ test('PATCH /api/orders/:id/status changes order status through allowed transiti
   }
 });
 
-test('PATCH /api/orders/:id/status adds debt only for the part above user limit', async () => {
+serialTest('PATCH /api/orders/:id/status adds debt only for the part above user limit', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -486,7 +474,7 @@ test('PATCH /api/orders/:id/status adds debt only for the part above user limit'
   }
 });
 
-test('PATCH /api/orders/:id/status does not add debt when order fits into limit', async () => {
+serialTest('PATCH /api/orders/:id/status does not add debt when order fits into limit', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -516,7 +504,7 @@ test('PATCH /api/orders/:id/status does not add debt when order fits into limit'
   }
 });
 
-test('POST /api/orders rejects creating a second order on the same day for the same user', async () => {
+serialTest('POST /api/orders allows creating multiple orders on the same day for the same user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -543,13 +531,16 @@ test('POST /api/orders rejects creating a second order on the same day for the s
     });
 
     assert.equal(firstResponse.status, 201);
-    assert.equal(secondResponse.status, 409);
+    assert.equal(secondResponse.status, 201);
+
+    const userOrders = await db('orders').where({ user_id: 4 });
+    assert.equal(userOrders.length, 5);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/orders rejects creation after route cutoff time', async () => {
+serialTest('POST /api/orders rejects creation after route cutoff time', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {

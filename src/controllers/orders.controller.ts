@@ -65,8 +65,10 @@ const routeColumns = [
   'deleted_at',
 ] as const;
 
-const hasActiveSubscription = (company?: Pick<CompanyModel, 'subscription_expires_at'> | null): boolean =>
-  Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
+const hasActiveSubscription = (
+  user?: Pick<UserModel, 'subscription_expires_at'> | null
+): boolean =>
+  Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
 
 type RequestedOrderItem = {
   dishId: number;
@@ -207,9 +209,9 @@ const requireDish = async (id: number): Promise<DishModel> => {
   return dish;
 };
 
-const loadCompany = async (id: number): Promise<Pick<CompanyModel, 'id' | 'address' | 'subscription_expires_at'> | undefined> =>
+const loadCompany = async (id: number): Promise<{ id: number; address: string | null; debt_cents: number } | undefined> =>
   db<CompanyModel>('companies')
-    .select('id', 'address', 'subscription_expires_at', 'debt_cents')
+    .select('id', 'address', 'debt_cents')
     .where({ id })
     .whereNull('deleted_at')
     .first();
@@ -235,16 +237,6 @@ const getAvailableRouteForCompany = async (
     .andWhere('r.departure_at', '>', new Date())
     .orderBy('r.departure_at', 'asc')
     .first();
-
-const getTodayBounds = () => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return { start, end };
-};
 
 const normalizeRequestedItems = (items: RequestedOrderItem[]): RequestedOrderItem[] => {
   const aggregated = new Map<number, number>();
@@ -334,28 +326,10 @@ const loadPricingSourcesForRequestedItems = async (
   });
 };
 
-const ensureUserCanCreateOnlyOneOrderPerDay = async (userId: number): Promise<void> => {
-  const { canCreateOrder } = await getUserOrderAvailability(userId);
-
-  if (!canCreateOrder) {
-    throw new AppError('User can create only one order per day', 409);
-  }
-};
-
 const getUserOrderAvailability = async (userId: number) => {
-  const { start, end } = getTodayBounds();
-  const existingOrder = await db<OrderModel>('orders')
-    .select(...orderColumns)
-    .where({ user_id: userId })
-    .whereNull('deleted_at')
-    .whereNot('status', 'cancelled')
-    .andWhere('created_at', '>=', start)
-    .andWhere('created_at', '<', end)
-    .first();
-
   return {
-    canCreateOrder: !existingOrder,
-    existingOrder,
+    canCreateOrder: true,
+    existingOrder: null as OrderModel | null,
   };
 };
 
@@ -426,16 +400,6 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
     throw new AppError('User not found', 404);
   }
 
-  const company = await trx<CompanyModel>('companies')
-    .select('id', 'subscription_expires_at')
-    .where({ id: order.company_id })
-    .whereNull('deleted_at')
-    .first();
-
-  if (!company) {
-    throw new AppError('Company not found', 404);
-  }
-
   const items = await trx<OrderItemModel>('order_items')
     .select(
       'order_id',
@@ -461,7 +425,7 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
       basePriceCents: item.base_price_cents,
       discountPriceCents: item.discount_price_cents,
     })),
-    hasActiveSubscription(company)
+    hasActiveSubscription(user)
   );
 
   const now = new Date();
@@ -530,19 +494,12 @@ const parseCreateOrderItems = (payload: unknown): RequestedOrderItem[] => {
 };
 
 const calculateDraftOrderFromItems = async (
-  companyId: number,
   items: RequestedOrderItem[],
-  user: Pick<UserModel, 'order_limit_cents'>
+  user: Pick<UserModel, 'order_limit_cents' | 'subscription_expires_at'>
 ) => {
-  const company = await loadCompany(companyId);
-
-  if (!company) {
-    throw new AppError('Company not found', 404);
-  }
-
   const pricedItems = buildPricedOrderItems(
     await loadPricingSourcesForRequestedItems(items),
-    hasActiveSubscription(company)
+    hasActiveSubscription(user)
   );
 
   const subtotalCents = pricedItems.reduce((sum, item) => sum + item.lineTotalCents, 0);
@@ -652,8 +609,6 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       throw new AppError('User must belong to a company to create an order', 409);
     }
 
-    await ensureUserCanCreateOnlyOneOrderPerDay(currentUser.id);
-
     const companyId = currentUser.company_id;
     const company = await loadCompany(companyId);
 
@@ -671,7 +626,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     const orderNumber = await getNextOrderNumber();
     const pricedItems = buildPricedOrderItems(
       await loadPricingSourcesForRequestedItems(items),
-      hasActiveSubscription(company)
+      hasActiveSubscription(currentUser)
     );
 
     const inserted = await db.transaction(async (trx) => {
@@ -741,7 +696,7 @@ export const calculateOrder = async (req: AuthRequest, res: Response, next: Next
       throw new AppError('User must belong to a company to calculate an order', 409);
     }
 
-    const calculated = await calculateDraftOrderFromItems(currentUser.company_id, items, currentUser);
+    const calculated = await calculateDraftOrderFromItems(items, currentUser);
 
     res.json(calculated);
   } catch (error) {

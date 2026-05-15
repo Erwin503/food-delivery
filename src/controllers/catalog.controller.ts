@@ -2,11 +2,12 @@ import { NextFunction, Request, Response } from 'express';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { CategoryModel, CompanyModel, DishModel } from '../models';
+import { CategoryModel, DishModel, UserModel } from '../models';
 import { buildUploadedFileUrl } from '../middleware/uploadMiddleware';
 import { toIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
 import { parseRequiredId } from '../utils/requestParams';
+import { requireAuthenticatedUser } from '../utils/userQueries';
 
 type CategoryRow = CategoryModel;
 type DishRow = DishModel;
@@ -26,10 +27,10 @@ const dishColumns = [
   'deleted_at',
 ] as const;
 
-type CompanySubscriptionRow = Pick<CompanyModel, 'id' | 'subscription_expires_at'>;
+type UserSubscriptionRow = Pick<UserModel, 'id' | 'subscription_expires_at'>;
 
-const hasActiveSubscription = (company?: CompanySubscriptionRow | null): boolean =>
-  Boolean(company?.subscription_expires_at && new Date(company.subscription_expires_at).getTime() > Date.now());
+const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
+  Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
 
 const isOmittedValue = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
@@ -57,16 +58,16 @@ const toDishDto = (dish: DishRow, discounted: boolean) => ({
   updatedAt: toIsoString(dish.updated_at),
 });
 
-const loadCompanyForUser = async (
-  companyId: number | null | undefined
-): Promise<CompanySubscriptionRow | undefined> => {
-  if (!companyId) {
+const loadUserSubscription = async (
+  userId: number | undefined
+): Promise<UserSubscriptionRow | undefined> => {
+  if (!userId) {
     return undefined;
   }
 
-  return db<CompanyModel>('companies')
+  return db<UserModel>('users')
     .select('id', 'subscription_expires_at')
-    .where({ id: companyId })
+    .where({ id: userId })
     .whereNull('deleted_at')
     .first();
 };
@@ -231,8 +232,8 @@ export const deleteCategory = async (req: Request, res: Response, next: NextFunc
 
 export const getDishes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const company = await loadCompanyForUser(req.user?.companyId);
-    const discounted = hasActiveSubscription(company);
+    const user = await requireAuthenticatedUser(req.user);
+    const discounted = hasActiveSubscription(user);
 
     const query = db<DishRow>('dishes as d')
       .join<CategoryRow>('categories as c', 'c.id', 'd.category_id')
@@ -283,9 +284,9 @@ export const getDishById = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const dishId = parseRequiredId(req.params.id, 'Dish id');
 
-    const company = await loadCompanyForUser(req.user?.companyId);
+    const user = await loadUserSubscription(req.user?.id);
     const dish = await requireDish(dishId);
-    res.json(toDishDto(dish, hasActiveSubscription(company)));
+    res.json(toDishDto(dish, hasActiveSubscription(user)));
   } catch (error) {
     next(error);
   }
@@ -297,14 +298,14 @@ export const getDishesByCategory = async (req: AuthRequest, res: Response, next:
 
     await requireCategory(categoryId);
 
-    const company = await loadCompanyForUser(req.user?.companyId);
+    const user = await loadUserSubscription(req.user?.id);
     const dishes = await db<DishRow>('dishes')
       .select(...dishColumns)
       .where({ category_id: categoryId })
       .whereNull('deleted_at')
       .orderBy('id', 'asc');
 
-    res.json(dishes.map((dish) => toDishDto(dish, hasActiveSubscription(company))));
+    res.json(dishes.map((dish) => toDishDto(dish, hasActiveSubscription(user))));
   } catch (error) {
     next(error);
   }

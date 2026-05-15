@@ -16,6 +16,11 @@ import {
 } from '../controllers/auth.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
+import {
+  authCodeConfirmLimiter,
+  authCodeRequestLimiter,
+  passwordLoginLimiter,
+} from '../middleware/security';
 import { avatarImageUpload } from '../middleware/uploadMiddleware';
 
 const router = Router();
@@ -69,6 +74,17 @@ const router = Router();
  *         debtCents:
  *           type: integer
  *           example: 25900
+ *         subscriptionStartedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         subscriptionExpiresAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         hasActiveSubscription:
+ *           type: boolean
+ *           example: false
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -296,7 +312,7 @@ const router = Router();
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/signup', signup);
+router.post('/signup', authCodeRequestLimiter, signup);
 
 /**
  * @swagger
@@ -336,7 +352,7 @@ router.post('/signup', signup);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/signup/confirm', confirmSignup);
+router.post('/signup/confirm', authCodeConfirmLimiter, confirmSignup);
 
 /**
  * @swagger
@@ -364,7 +380,7 @@ router.post('/signup/confirm', confirmSignup);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/login/step1', loginStep1);
+router.post('/login/step1', authCodeRequestLimiter, loginStep1);
 
 /**
  * @swagger
@@ -404,7 +420,7 @@ router.post('/login/step1', loginStep1);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/login/step2', loginStep2);
+router.post('/login/step2', authCodeConfirmLimiter, loginStep2);
 
 /**
  * @swagger
@@ -438,7 +454,7 @@ router.post('/login/step2', loginStep2);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/login/password', passwordLogin);
+router.post('/login/password', passwordLoginLimiter, passwordLogin);
 
 /**
  * @swagger
@@ -579,7 +595,7 @@ router.put('/password', authenticateToken, setPassword);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/password/reset/request', requestPasswordReset);
+router.post('/password/reset/request', authCodeRequestLimiter, requestPasswordReset);
 
 /**
  * @swagger
@@ -619,7 +635,7 @@ router.post('/password/reset/request', requestPasswordReset);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
-router.post('/password/reset/confirm', confirmPasswordReset);
+router.post('/password/reset/confirm', authCodeConfirmLimiter, confirmPasswordReset);
 
 /**
  * @swagger

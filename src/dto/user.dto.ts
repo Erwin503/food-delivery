@@ -10,6 +10,9 @@ export interface UserDto {
   avatarUrl: string | null;
   orderLimitCents: number;
   debtCents: number;
+  subscriptionStartedAt: string | null;
+  subscriptionExpiresAt: string | null;
+  hasActiveSubscription: boolean;
   createdAt: string;
   updatedAt: string;
 }

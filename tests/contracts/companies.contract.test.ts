@@ -5,6 +5,9 @@ import { generateToken } from '../../src/utils/generateToken';
 import { seed } from '../../seeds/01_demo_data';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
+const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
+  test(name, { concurrency: false }, fn);
+
 const adminToken = () =>
   generateToken({ id: 1, email: 'admin@cook.local', role: 'admin', companyId: null });
 
@@ -22,7 +25,7 @@ test.beforeEach(async () => {
   await db('users').where({ id: 7 }).update({ company_id: null, updated_at: '2026-03-15 09:00:00' });
 });
 
-test('GET /api/companies returns all visible companies for an authenticated user', async () => {
+serialTest('GET /api/companies returns all visible companies for an authenticated user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -52,7 +55,7 @@ test('GET /api/companies returns all visible companies for an authenticated user
   }
 });
 
-test('GET /api/companies/:id returns a single company by id', async () => {
+serialTest('GET /api/companies/:id returns a single company by id', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -72,7 +75,7 @@ test('GET /api/companies/:id returns a single company by id', async () => {
   }
 });
 
-test('POST /api/companies creates a company for admin role', async () => {
+serialTest('POST /api/companies creates a company for admin role', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -97,7 +100,7 @@ test('POST /api/companies creates a company for admin role', async () => {
   }
 });
 
-test('PUT /api/companies/:id updates company fields for admin or manager', async () => {
+serialTest('PUT /api/companies/:id updates company fields for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -120,7 +123,7 @@ test('PUT /api/companies/:id updates company fields for admin or manager', async
   }
 });
 
-test('DELETE /api/companies/:id removes or archives a company for admin role', async () => {
+serialTest('DELETE /api/companies/:id removes or archives a company for admin role', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -138,7 +141,7 @@ test('DELETE /api/companies/:id removes or archives a company for admin role', a
   }
 });
 
-test('GET /api/companies/:id/users returns company users for admin or manager', async () => {
+serialTest('GET /api/companies/:id/users returns company users for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -157,7 +160,7 @@ test('GET /api/companies/:id/users returns company users for admin or manager', 
   }
 });
 
-test('POST /api/companies/:id/users assigns a user to a company', async () => {
+serialTest('POST /api/companies/:id/users assigns a user to a company', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -181,7 +184,7 @@ test('POST /api/companies/:id/users assigns a user to a company', async () => {
   }
 });
 
-test('PUT /api/companies/:id/users/:userId/limit lets admin set limit for any company member', async () => {
+serialTest('PUT /api/companies/:id/users/:userId/limit lets admin set limit for any company member', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -205,7 +208,7 @@ test('PUT /api/companies/:id/users/:userId/limit lets admin set limit for any co
   }
 });
 
-test('PUT /api/companies/:id/users/:userId/limit lets manager set limit only for employees in own company', async () => {
+serialTest('PUT /api/companies/:id/users/:userId/limit lets manager set limit only for employees in own company', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -237,7 +240,7 @@ test('PUT /api/companies/:id/users/:userId/limit lets manager set limit only for
   }
 });
 
-test('POST /api/companies/:id/users/:userId/debt-payment lets admin accept debt payment', async () => {
+serialTest('POST /api/companies/:id/users/:userId/debt-payment lets admin accept debt payment', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -261,7 +264,7 @@ test('POST /api/companies/:id/users/:userId/debt-payment lets admin accept debt 
   }
 });
 
-test('PATCH /api/orders/:id/status increases company debt by the covered part of order', async () => {
+serialTest('PATCH /api/orders/:id/status increases company debt by the covered part of order', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -283,7 +286,7 @@ test('PATCH /api/orders/:id/status increases company debt by the covered part of
   }
 });
 
-test('DELETE /api/companies/:id/users/:userId clears company assignment for a user', async () => {
+serialTest('DELETE /api/companies/:id/users/:userId clears company assignment for a user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -301,7 +304,7 @@ test('DELETE /api/companies/:id/users/:userId clears company assignment for a us
   }
 });
 
-test('GET /api/companies/:id/manager returns the assigned manager or null', async () => {
+serialTest('GET /api/companies/:id/manager returns the assigned manager or null', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -321,7 +324,7 @@ test('GET /api/companies/:id/manager returns the assigned manager or null', asyn
   }
 });
 
-test('PUT /api/companies/:id/manager assigns the company manager', async () => {
+serialTest('PUT /api/companies/:id/manager assigns the company manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -346,7 +349,7 @@ test('PUT /api/companies/:id/manager assigns the company manager', async () => {
   }
 });
 
-test('PUT /api/companies/:id/manager lets current manager transfer role to an employee of the same company', async () => {
+serialTest('PUT /api/companies/:id/manager lets current manager transfer role to an employee of the same company', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -376,11 +379,11 @@ test('PUT /api/companies/:id/manager lets current manager transfer role to an em
   }
 });
 
-test('POST /api/companies/:id/subscription purchases or extends company subscription for one month', async () => {
+serialTest('POST /api/companies/:id/users/:userId/subscription purchases or extends personal subscription for one month', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const response = await fetch(`${baseUrl}/api/companies/1/subscription`, {
+    const response = await fetch(`${baseUrl}/api/companies/1/users/5/subscription`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${managerToken()}` },
     });
@@ -391,15 +394,15 @@ test('POST /api/companies/:id/subscription purchases or extends company subscrip
     assert.ok(payload.subscriptionStartedAt);
     assert.ok(payload.subscriptionExpiresAt);
 
-    const company = await db('companies').where({ id: 1 }).first();
-    assert.ok(company.subscription_started_at);
-    assert.ok(company.subscription_expires_at);
+    const user = await db('users').where({ id: 5 }).first();
+    assert.ok(user.subscription_started_at);
+    assert.ok(user.subscription_expires_at);
   } finally {
     await stopTestServer(server);
   }
 });
 
-test('POST /api/companies/join-code creates a personal short join code for a free employee', async () => {
+serialTest('POST /api/companies/join-code creates a personal short join code for a free employee', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -411,7 +414,7 @@ test('POST /api/companies/join-code creates a personal short join code for a fre
     assert.equal(response.status, 201);
     const payload = await response.json();
     assert.equal(typeof payload.code, 'string');
-    assert.equal(payload.code.length, 6);
+    assert.equal(payload.code.length, 4);
     assert.equal(payload.expiresInSeconds, 900);
 
     const code = await db('company_join_codes').where({ code: payload.code }).first();
@@ -422,7 +425,7 @@ test('POST /api/companies/join-code creates a personal short join code for a fre
   }
 });
 
-test('POST /api/companies/join lets a manager confirm employee join to own company with employee code', async () => {
+serialTest('POST /api/companies/join lets a manager confirm employee join to own company with employee code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -463,7 +466,7 @@ test('POST /api/companies/join lets a manager confirm employee join to own compa
   }
 });
 
-test('POST /api/companies/join lets admin confirm employee join to selected company by code', async () => {
+serialTest('POST /api/companies/join lets admin confirm employee join to selected company by code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {

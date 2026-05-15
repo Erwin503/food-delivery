@@ -10,7 +10,7 @@ import {
   getCompanyManager,
   getCompanyUsers,
   joinCompanyByCode,
-  purchaseCompanySubscription,
+  purchaseCompanyUserSubscription,
   removeCompanyUser,
   setCompanyUserLimit,
   setCompanyManager,
@@ -46,16 +46,6 @@ const router = Router();
  *           nullable: true
  *         debtCents:
  *           type: integer
- *         subscriptionStartedAt:
- *           type: string
- *           format: date-time
- *           nullable: true
- *         subscriptionExpiresAt:
- *           type: string
- *           format: date-time
- *           nullable: true
- *         hasActiveSubscription:
- *           type: boolean
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -137,9 +127,6 @@ const router = Router();
  *         companyId:
  *           type: integer
  *           nullable: true
- *     CompanySubscriptionResponse:
- *       allOf:
- *         - $ref: '#/components/schemas/Company'
  */
 
 /**
@@ -470,9 +457,9 @@ router.put('/companies/:id/manager', authenticateToken, checkRole(['admin', 'man
 
 /**
  * @swagger
- * /companies/{id}/subscription:
+ * /companies/{id}/users/{userId}/subscription:
  *   post:
- *     summary: Purchase or extend company subscription for one month
+ *     summary: Purchase or extend personal subscription for one month
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
@@ -482,15 +469,20 @@ router.put('/companies/:id/manager', authenticateToken, checkRole(['admin', 'man
  *         required: true
  *         schema:
  *           type: integer
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Subscription updated
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/CompanySubscriptionResponse'
+ *               $ref: '#/components/schemas/User'
  */
-router.post('/companies/:id/subscription', authenticateToken, checkRole(['admin', 'manager']), purchaseCompanySubscription);
+router.post('/companies/:id/users/:userId/subscription', authenticateToken, checkRole(['admin', 'manager']), purchaseCompanyUserSubscription);
 
 /**
  * @swagger
