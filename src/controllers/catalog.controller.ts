@@ -242,6 +242,7 @@ export const getDishes = async (req: AuthRequest, res: Response, next: NextFunct
         'd.category_id',
         'd.name',
         'd.description',
+        'd.image_url',
         'd.base_price_cents',
         'd.discount_price_cents',
         'd.is_active',
