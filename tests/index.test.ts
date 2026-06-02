@@ -1,5 +1,10 @@
-import { after, before } from 'node:test';
-import db from '../src/db/knex';
+process.env.NODE_ENV = 'test';
+
+const test = require('node:test');
+const { after, before } = test;
+test.setDefaultOptions?.({ concurrency: false });
+
+const db = require('../src/db/knex').default;
 const knexConfig = require('../knexfile');
 
 const testModule = process.env.TEST_MODULE ?? 'all';
@@ -14,6 +19,10 @@ before(async () => {
 
 if (testModule === 'all' || testModule === 'smoke') {
   require('./app.smoke.test');
+}
+
+if (testModule === 'all' || testModule === 'notifications') {
+  require('./notifications.test');
 }
 
 if (testModule === 'all' || testModule === 'auth') {

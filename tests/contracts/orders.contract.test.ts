@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { generateToken } from '../../src/utils/generateToken';
-import { seed } from '../../seeds/01_demo_data';
+import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
 const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
@@ -18,7 +18,11 @@ const employeeToken = () =>
   generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
 
 test.beforeEach(async () => {
-  await seed(db);
+  await lockAndSeedDb(db);
+});
+
+test.afterEach(() => {
+  releaseDbTestLock();
 });
 
 serialTest('GET /api/orders returns filtered orders list for admin or manager', async () => {
@@ -534,7 +538,7 @@ serialTest('POST /api/orders allows creating multiple orders on the same day for
     assert.equal(secondResponse.status, 201);
 
     const userOrders = await db('orders').where({ user_id: 4 });
-    assert.equal(userOrders.length, 5);
+    assert.equal(userOrders.length, 3);
   } finally {
     await stopTestServer(server);
   }

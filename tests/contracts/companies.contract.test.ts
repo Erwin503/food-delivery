@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { generateToken } from '../../src/utils/generateToken';
-import { seed } from '../../seeds/01_demo_data';
+import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
 const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
@@ -21,8 +21,12 @@ const freeEmployeeToken = () =>
   generateToken({ id: 7, email: 'employee.sever@cook.local', role: 'employee', companyId: null });
 
 test.beforeEach(async () => {
-  await seed(db);
+  await lockAndSeedDb(db);
   await db('users').where({ id: 7 }).update({ company_id: null, updated_at: '2026-03-15 09:00:00' });
+});
+
+test.afterEach(() => {
+  releaseDbTestLock();
 });
 
 serialTest('GET /api/companies returns all visible companies for an authenticated user', async () => {

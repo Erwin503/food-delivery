@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { generateToken } from '../../src/utils/generateToken';
-import { seed } from '../../seeds/01_demo_data';
+import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
+
+const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
+  test(name, { concurrency: false }, fn);
 
 const employeeToken = () =>
   generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
@@ -12,10 +15,14 @@ const managerToken = () =>
   generateToken({ id: 2, email: 'manager.romashka@cook.local', role: 'manager', companyId: 1 });
 
 test.beforeEach(async () => {
-  await seed(db);
+  await lockAndSeedDb(db);
 });
 
-test('GET /api/categories returns sorted categories list', async () => {
+test.afterEach(() => {
+  releaseDbTestLock();
+});
+
+serialTest('GET /api/categories returns sorted categories list', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -35,7 +42,7 @@ test('GET /api/categories returns sorted categories list', async () => {
   }
 });
 
-test('GET /api/categories/:id returns a category by id', async () => {
+serialTest('GET /api/categories/:id returns a category by id', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -52,7 +59,7 @@ test('GET /api/categories/:id returns a category by id', async () => {
   }
 });
 
-test('POST /api/categories creates a category for manager or admin', async () => {
+serialTest('POST /api/categories creates a category for manager or admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -83,7 +90,7 @@ test('POST /api/categories creates a category for manager or admin', async () =>
   }
 });
 
-test('PUT /api/categories/:id partially updates a category', async () => {
+serialTest('PUT /api/categories/:id partially updates a category', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -105,7 +112,7 @@ test('PUT /api/categories/:id partially updates a category', async () => {
   }
 });
 
-test('PUT /api/categories/:id ignores omitted fields and keeps current values', async () => {
+serialTest('PUT /api/categories/:id ignores omitted fields and keeps current values', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -129,7 +136,7 @@ test('PUT /api/categories/:id ignores omitted fields and keeps current values', 
   }
 });
 
-test('DELETE /api/categories/:id deletes or archives a category', async () => {
+serialTest('DELETE /api/categories/:id deletes or archives a category', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -149,7 +156,7 @@ test('DELETE /api/categories/:id deletes or archives a category', async () => {
   }
 });
 
-test('GET /api/dishes returns dishes with category and active filters', async () => {
+serialTest('GET /api/dishes returns dishes with category and active filters', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -170,7 +177,7 @@ test('GET /api/dishes returns dishes with category and active filters', async ()
   }
 });
 
-test('GET /api/dishes/:id returns a dish by id', async () => {
+serialTest('GET /api/dishes/:id returns a dish by id', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -187,7 +194,7 @@ test('GET /api/dishes/:id returns a dish by id', async () => {
   }
 });
 
-test('GET /api/categories/:id/dishes returns dishes for the selected category', async () => {
+serialTest('GET /api/categories/:id/dishes returns dishes for the selected category', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -207,7 +214,7 @@ test('GET /api/categories/:id/dishes returns dishes for the selected category', 
   }
 });
 
-test('POST /api/dishes creates a dish for manager or admin', async () => {
+serialTest('POST /api/dishes creates a dish for manager or admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -242,7 +249,7 @@ test('POST /api/dishes creates a dish for manager or admin', async () => {
   }
 });
 
-test('PUT /api/dishes/:id partially updates a dish', async () => {
+serialTest('PUT /api/dishes/:id partially updates a dish', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -272,7 +279,7 @@ test('PUT /api/dishes/:id partially updates a dish', async () => {
   }
 });
 
-test('PUT /api/dishes/:id ignores omitted fields and keeps current values', async () => {
+serialTest('PUT /api/dishes/:id ignores omitted fields and keeps current values', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -297,7 +304,7 @@ test('PUT /api/dishes/:id ignores omitted fields and keeps current values', asyn
   }
 });
 
-test('DELETE /api/dishes/:id deletes or archives a dish', async () => {
+serialTest('DELETE /api/dishes/:id deletes or archives a dish', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {

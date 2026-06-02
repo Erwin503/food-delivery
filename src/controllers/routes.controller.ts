@@ -81,7 +81,7 @@ const loadRouteCompanies = async (routeId: number): Promise<Array<Pick<CompanyMo
     .select(...companyColumns.map((column) => `c.${column}`))
     .where('rc.route_id', routeId)
     .whereNull('c.deleted_at')
-    .orderBy('c.name', 'asc');
+    .orderBy('c.id', 'asc');
 
 export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

@@ -2,18 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { generateToken } from '../../src/utils/generateToken';
-import { seed } from '../../seeds/01_demo_data';
+import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
+const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
+  test(name, { concurrency: false }, fn);
+
 test.beforeEach(async () => {
-  await seed(db);
+  await lockAndSeedDb(db);
 });
 
-test.after(async () => {
-  await db.destroy();
+test.afterEach(() => {
+  releaseDbTestLock();
 });
 
-test('POST /api/auth/signup creates an unverified user and verification code', async () => {
+serialTest('POST /api/auth/signup creates an unverified user and verification code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -46,7 +49,7 @@ test('POST /api/auth/signup creates an unverified user and verification code', a
   }
 });
 
-test('POST /api/auth/signup updates an existing unverified user and issues a fresh verification code', async () => {
+serialTest('POST /api/auth/signup updates an existing unverified user and issues a fresh verification code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -100,7 +103,7 @@ test('POST /api/auth/signup updates an existing unverified user and issues a fre
   }
 });
 
-test('POST /api/auth/signup/confirm verifies the code created during password signup and returns JWT', async () => {
+serialTest('POST /api/auth/signup/confirm verifies the code created during password signup and returns JWT', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -143,7 +146,7 @@ test('POST /api/auth/signup/confirm verifies the code created during password si
   }
 });
 
-test('POST /api/auth/login/step1 sends a one-time email code only for a verified user', async () => {
+serialTest('POST /api/auth/login/step1 sends a one-time email code only for a verified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -164,7 +167,7 @@ test('POST /api/auth/login/step1 sends a one-time email code only for a verified
   }
 });
 
-test('POST /api/auth/login/step1 rejects unknown email', async () => {
+serialTest('POST /api/auth/login/step1 rejects unknown email', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -180,7 +183,7 @@ test('POST /api/auth/login/step1 rejects unknown email', async () => {
   }
 });
 
-test('POST /api/auth/login/step1 rejects unverified user', async () => {
+serialTest('POST /api/auth/login/step1 rejects unverified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -198,7 +201,7 @@ test('POST /api/auth/login/step1 rejects unverified user', async () => {
   }
 });
 
-test('POST /api/auth/login/step2 returns JWT for a verified user with a valid code', async () => {
+serialTest('POST /api/auth/login/step2 returns JWT for a verified user with a valid code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -216,7 +219,7 @@ test('POST /api/auth/login/step2 returns JWT for a verified user with a valid co
   }
 });
 
-test('POST /api/auth/login/step2 rejects unverified user even with a valid code', async () => {
+serialTest('POST /api/auth/login/step2 rejects unverified user even with a valid code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -234,7 +237,7 @@ test('POST /api/auth/login/step2 rejects unverified user even with a valid code'
   }
 });
 
-test('POST /api/auth/login/password rejects unverified user', async () => {
+serialTest('POST /api/auth/login/password rejects unverified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -252,7 +255,7 @@ test('POST /api/auth/login/password rejects unverified user', async () => {
   }
 });
 
-test('GET /api/auth/profile returns current user for a valid bearer token', async () => {
+serialTest('GET /api/auth/profile returns current user for a valid bearer token', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -265,7 +268,7 @@ test('GET /api/auth/profile returns current user for a valid bearer token', asyn
   }
 });
 
-test('PUT /api/auth/profile updates profile and uploads avatar for current user', async () => {
+serialTest('PUT /api/auth/profile updates profile and uploads avatar for current user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -292,7 +295,7 @@ test('PUT /api/auth/profile updates profile and uploads avatar for current user'
   }
 });
 
-test('PUT /api/auth/push-token saves Firebase token for current user', async () => {
+serialTest('PUT /api/auth/push-token saves Firebase token for current user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -312,7 +315,7 @@ test('PUT /api/auth/push-token saves Firebase token for current user', async () 
   }
 });
 
-test('PUT /api/auth/password sets a new password for the current user', async () => {
+serialTest('PUT /api/auth/password sets a new password for the current user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -329,7 +332,7 @@ test('PUT /api/auth/password sets a new password for the current user', async ()
   }
 });
 
-test('POST /api/auth/password/reset/request creates a reset code for an existing user', async () => {
+serialTest('POST /api/auth/password/reset/request creates a reset code for an existing user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -345,7 +348,7 @@ test('POST /api/auth/password/reset/request creates a reset code for an existing
   }
 });
 
-test('POST /api/auth/password/reset/confirm resets the password using a valid code', async () => {
+serialTest('POST /api/auth/password/reset/confirm resets the password using a valid code', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -361,7 +364,7 @@ test('POST /api/auth/password/reset/confirm resets the password using a valid co
   }
 });
 
-test('GET /api/auth/all returns users list for admins only', async () => {
+serialTest('GET /api/auth/all returns users list for admins only', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {

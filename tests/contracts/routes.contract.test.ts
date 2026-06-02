@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { generateToken } from '../../src/utils/generateToken';
-import { seed } from '../../seeds/01_demo_data';
+import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
+
+const serialTest = (name: string, fn: (t: unknown) => Promise<void> | void) =>
+  test(name, { concurrency: false }, fn);
 
 const adminToken = () =>
   generateToken({ id: 1, email: 'admin@cook.local', role: 'admin', companyId: null });
@@ -12,10 +15,14 @@ const managerToken = () =>
   generateToken({ id: 2, email: 'manager.romashka@cook.local', role: 'manager', companyId: 1 });
 
 test.beforeEach(async () => {
-  await seed(db);
+  await lockAndSeedDb(db);
 });
 
-test('GET /api/routes returns routes filtered by date range', async () => {
+test.afterEach(() => {
+  releaseDbTestLock();
+});
+
+serialTest('GET /api/routes returns routes filtered by date range', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -32,7 +39,7 @@ test('GET /api/routes returns routes filtered by date range', async () => {
   }
 });
 
-test('GET /api/routes/:id returns one route with its details', async () => {
+serialTest('GET /api/routes/:id returns one route with its details', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -50,7 +57,7 @@ test('GET /api/routes/:id returns one route with its details', async () => {
   }
 });
 
-test('POST /api/routes creates a route for admin', async () => {
+serialTest('POST /api/routes creates a route for admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -81,7 +88,7 @@ test('POST /api/routes creates a route for admin', async () => {
   }
 });
 
-test('PUT /api/routes/:id updates route fields', async () => {
+serialTest('PUT /api/routes/:id updates route fields', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -114,7 +121,7 @@ test('PUT /api/routes/:id updates route fields', async () => {
   }
 });
 
-test('PUT /api/routes/:id ignores omitted fields and keeps current values', async () => {
+serialTest('PUT /api/routes/:id ignores omitted fields and keeps current values', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -142,7 +149,7 @@ test('PUT /api/routes/:id ignores omitted fields and keeps current values', asyn
   }
 });
 
-test('DELETE /api/routes/:id deletes or archives a route', async () => {
+serialTest('DELETE /api/routes/:id deletes or archives a route', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -159,7 +166,7 @@ test('DELETE /api/routes/:id deletes or archives a route', async () => {
   }
 });
 
-test('GET /api/routes/:id/companies returns companies assigned to a route', async () => {
+serialTest('GET /api/routes/:id/companies returns companies assigned to a route', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -175,7 +182,7 @@ test('GET /api/routes/:id/companies returns companies assigned to a route', asyn
   }
 });
 
-test('POST /api/routes/:id/companies assigns a company to a route', async () => {
+serialTest('POST /api/routes/:id/companies assigns a company to a route', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -196,7 +203,7 @@ test('POST /api/routes/:id/companies assigns a company to a route', async () => 
   }
 });
 
-test('DELETE /api/routes/:id/companies/:companyId removes a company from a route', async () => {
+serialTest('DELETE /api/routes/:id/companies/:companyId removes a company from a route', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -213,7 +220,7 @@ test('DELETE /api/routes/:id/companies/:companyId removes a company from a route
   }
 });
 
-test('routes endpoints are forbidden for non-admin users', async () => {
+serialTest('routes endpoints are forbidden for non-admin users', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
