@@ -218,7 +218,7 @@ export const buildSessionEmailContent = async (
     .first();
 
   if (!session) {
-    throw new Error('Сессия не найдена');
+    throw new Error('\u0421\u0435\u0441\u0441\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430');
   }
 
   const { qrCode } = await generateSessionQrCode(sessionId);
@@ -232,7 +232,7 @@ export const buildSessionEmailContent = async (
     qrCode
   );
 
-  const subject = `Подтверждение записи на приём - ${session.specific_date} ${session.start_time}`;
+  const subject = `\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u043d\u0430 \u043f\u0440\u0438\u0451\u043c - ${session.specific_date} ${session.start_time}`;
 
   return { subject, html };
 };
