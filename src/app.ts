@@ -36,6 +36,7 @@ export const createApp = () => {
   app.use(express.json());
   app.use(logRequests);
   app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+  app.use('/firebase-test', express.static(path.resolve(process.cwd(), 'public/firebase-test')));
   app.get('/api-docs/openapi.json', (req, res) => {
     const forwardedProtoHeader = req.headers['x-forwarded-proto'];
     const forwardedProto = Array.isArray(forwardedProtoHeader)

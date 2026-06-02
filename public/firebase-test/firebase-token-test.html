@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Firebase FCM Token Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, sans-serif;
+        background: #f6f7f9;
+        color: #17202a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 920px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 20px;
+        color: #4b5563;
+        line-height: 1.5;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #344054;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: inherit;
+        background: #fff;
+        color: #111827;
+      }
+
+      textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+
+      .wide {
+        grid-column: 1 / -1;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 14px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        background: #1f7a5a;
+        color: #fff;
+      }
+
+      button.secondary {
+        background: #344054;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      output,
+      pre {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        padding: 12px;
+        background: #fff;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .status {
+        margin-top: 16px;
+      }
+
+      @media (max-width: 760px) {
+        body {
+          padding: 20px;
+        }
+
+        form {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Firebase FCM Token Test</h1>
+      <p>
+        Paste Firebase Web config and Web Push certificate key, then request browser permission.
+        The generated token can be saved to this backend with a user JWT.
+      </p>
+
+      <form id="config-form">
+        <label>
+          apiKey
+          <input id="apiKey" autocomplete="off" required />
+        </label>
+        <label>
+          authDomain
+          <input id="authDomain" autocomplete="off" required />
+        </label>
+        <label>
+          projectId
+          <input id="projectId" autocomplete="off" required />
+        </label>
+        <label>
+          storageBucket
+          <input id="storageBucket" autocomplete="off" required />
+        </label>
+        <label>
+          messagingSenderId
+          <input id="messagingSenderId" autocomplete="off" required />
+        </label>
+        <label>
+          appId
+          <input id="appId" autocomplete="off" required />
+        </label>
+        <label class="wide">
+          VAPID key
+          <input id="vapidKey" autocomplete="off" required />
+        </label>
+        <label class="wide">
+          User JWT for PUT /api/auth/push-token
+          <textarea id="jwt" autocomplete="off" placeholder="Optional"></textarea>
+        </label>
+      </form>
+
+      <div class="actions">
+        <button id="get-token" type="button">Get FCM token</button>
+        <button id="save-token" class="secondary" type="button" disabled>Save token to backend</button>
+      </div>
+
+      <label class="wide">
+        FCM token
+        <pre id="token"></pre>
+      </label>
+
+      <output id="status" class="status">Waiting for Firebase config.</output>
+    </main>
+
+    <script type="module">
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+      import { getMessaging, getToken } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js';
+
+      const fields = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'vapidKey', 'jwt'];
+      const form = document.querySelector('#config-form');
+      const tokenOutput = document.querySelector('#token');
+      const statusOutput = document.querySelector('#status');
+      const getTokenButton = document.querySelector('#get-token');
+      const saveTokenButton = document.querySelector('#save-token');
+
+      let currentToken = '';
+
+      const setStatus = (message) => {
+        statusOutput.textContent = message;
+      };
+
+      const readConfig = () => ({
+        apiKey: document.querySelector('#apiKey').value.trim(),
+        authDomain: document.querySelector('#authDomain').value.trim(),
+        projectId: document.querySelector('#projectId').value.trim(),
+        storageBucket: document.querySelector('#storageBucket').value.trim(),
+        messagingSenderId: document.querySelector('#messagingSenderId').value.trim(),
+        appId: document.querySelector('#appId').value.trim(),
+      });
+
+      const saveForm = () => {
+        const values = {};
+
+        for (const field of fields) {
+          values[field] = document.querySelector(`#${field}`).value;
+        }
+
+        localStorage.setItem('firebaseTokenTestConfig', JSON.stringify(values));
+      };
+
+      const restoreForm = () => {
+        const raw = localStorage.getItem('firebaseTokenTestConfig');
+
+        if (!raw) {
+          return;
+        }
+
+        const values = JSON.parse(raw);
+
+        for (const field of fields) {
+          if (values[field]) {
+            document.querySelector(`#${field}`).value = values[field];
+          }
+        }
+      };
+
+      form.addEventListener('input', saveForm);
+      restoreForm();
+
+      getTokenButton.addEventListener('click', async () => {
+        try {
+          getTokenButton.disabled = true;
+          saveTokenButton.disabled = true;
+          tokenOutput.textContent = '';
+          setStatus('Registering service worker...');
+
+          const config = readConfig();
+          const vapidKey = document.querySelector('#vapidKey').value.trim();
+          const missing = Object.entries({ ...config, vapidKey })
+            .filter(([, value]) => !value)
+            .map(([key]) => key);
+
+          if (missing.length) {
+            throw new Error(`Missing fields: ${missing.join(', ')}`);
+          }
+
+          const registration = await navigator.serviceWorker.register('/firebase-test/firebase-messaging-sw.js');
+          await navigator.serviceWorker.ready;
+          registration.active?.postMessage({ type: 'FIREBASE_CONFIG', config });
+
+          setStatus('Requesting notification permission...');
+          const permission = await Notification.requestPermission();
+
+          if (permission !== 'granted') {
+            throw new Error(`Notification permission is ${permission}`);
+          }
+
+          setStatus('Requesting FCM token...');
+          const app = initializeApp(config);
+          const messaging = getMessaging(app);
+          currentToken = await getToken(messaging, {
+            vapidKey,
+            serviceWorkerRegistration: registration,
+          });
+
+          if (!currentToken) {
+            throw new Error('Firebase returned an empty token.');
+          }
+
+          tokenOutput.textContent = currentToken;
+          saveTokenButton.disabled = false;
+          setStatus('Token generated.');
+        } catch (error) {
+          currentToken = '';
+          tokenOutput.textContent = '';
+          setStatus(error instanceof Error ? error.message : String(error));
+        } finally {
+          getTokenButton.disabled = false;
+        }
+      });
+
+      saveTokenButton.addEventListener('click', async () => {
+        const jwt = document.querySelector('#jwt').value.trim();
+
+        if (!currentToken) {
+          setStatus('Generate an FCM token first.');
+          return;
+        }
+
+        if (!jwt) {
+          setStatus('Paste a user JWT before saving token to backend.');
+          return;
+        }
+
+        try {
+          saveTokenButton.disabled = true;
+          setStatus('Saving token to backend...');
+
+          const response = await fetch('/api/auth/push-token', {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${jwt}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ firebaseToken: currentToken }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Backend returned HTTP ${response.status}`);
+          }
+
+          setStatus('Token saved to backend.');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+        } finally {
+          saveTokenButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
