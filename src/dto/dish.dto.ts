@@ -3,6 +3,7 @@ export interface DishDto {
   categoryId: number;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   basePriceCents: number;
   discountPriceCents: number;
   priceCents: number;
@@ -27,4 +28,16 @@ export interface UpdateDishDto {
   basePriceCents?: number;
   discountPriceCents?: number;
   isActive?: boolean;
+}
+
+export interface DishPaginationDto {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface PaginatedDishesDto {
+  items: DishDto[];
+  pagination: DishPaginationDto;
 }

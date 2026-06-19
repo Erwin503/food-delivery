@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
+import type { Knex } from 'knex';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -29,11 +30,147 @@ const dishColumns = [
 
 type UserSubscriptionRow = Pick<UserModel, 'id' | 'subscription_expires_at'>;
 
+type DishListFilters = {
+  page: number;
+  limit: number;
+  categoryId?: number;
+  isActive?: boolean;
+  query?: string;
+};
+
+const DEFAULT_DISHES_PAGE_SIZE = 20;
+const MAX_DISHES_PAGE_SIZE = 100;
+
 const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
 
 const isOmittedValue = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+const parsePositiveIntegerQuery = (value: unknown, fieldName: string, defaultValue: number): number => {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new AppError(`${fieldName} must be a positive integer`, 400);
+  }
+
+  return parsed;
+};
+
+const parseDishListFilters = (query: Request['query'], requireQuery: boolean): DishListFilters => {
+  const page = parsePositiveIntegerQuery(query.page, 'page', 1);
+  const limit = parsePositiveIntegerQuery(query.limit, 'limit', DEFAULT_DISHES_PAGE_SIZE);
+
+  if (limit > MAX_DISHES_PAGE_SIZE) {
+    throw new AppError(`limit must not exceed ${MAX_DISHES_PAGE_SIZE}`, 400);
+  }
+
+  const filters: DishListFilters = { page, limit };
+
+  if (query.categoryId !== undefined) {
+    const categoryId = Number(query.categoryId);
+
+    if (!Number.isInteger(categoryId) || categoryId < 1) {
+      throw new AppError('categoryId must be a positive integer', 400);
+    }
+
+    filters.categoryId = categoryId;
+  }
+
+  if (query.isActive !== undefined) {
+    const rawIsActive = String(query.isActive).toLowerCase();
+
+    if (!['true', 'false'].includes(rawIsActive)) {
+      throw new AppError('isActive must be true or false', 400);
+    }
+
+    filters.isActive = rawIsActive === 'true';
+  }
+
+  const rawQuery = query.q === undefined ? '' : String(query.q).trim();
+
+  if (requireQuery && !rawQuery) {
+    throw new AppError('q is required', 400);
+  }
+
+  if (rawQuery.length > 100) {
+    throw new AppError('q must not exceed 100 characters', 400);
+  }
+
+  if (rawQuery) {
+    filters.query = rawQuery;
+  }
+
+  return filters;
+};
+
+const buildDishesListQuery = (filters: DishListFilters): Knex.QueryBuilder => {
+  const query = db<DishRow>('dishes as d')
+    .join<CategoryRow>('categories as c', 'c.id', 'd.category_id')
+    .whereNull('d.deleted_at')
+    .whereNull('c.deleted_at');
+
+  if (filters.categoryId) {
+    query.andWhere('d.category_id', filters.categoryId);
+  }
+
+  if (filters.isActive !== undefined) {
+    query.andWhere('d.is_active', filters.isActive);
+  }
+
+  if (filters.query) {
+    const pattern = `%${filters.query}%`;
+    query.andWhere((builder) => {
+      builder.where('d.name', 'like', pattern).orWhere('d.description', 'like', pattern);
+    });
+  }
+
+  return query;
+};
+
+const listDishes = async (userId: number | undefined, filters: DishListFilters) => {
+  const user = await loadUserSubscription(userId);
+  const query = buildDishesListQuery(filters);
+  const offset = (filters.page - 1) * filters.limit;
+
+  const [totalRow, dishes] = await Promise.all([
+    query.clone().count<{ total: number | string }>({ total: 'd.id' }).first(),
+    query
+      .clone()
+      .select(
+        'd.id',
+        'd.category_id',
+        'd.name',
+        'd.description',
+        'd.image_url',
+        'd.base_price_cents',
+        'd.discount_price_cents',
+        'd.is_active',
+        'd.created_at',
+        'd.updated_at',
+        'd.deleted_at'
+      )
+      .orderBy('d.id', 'asc')
+      .limit(filters.limit)
+      .offset(offset),
+  ]);
+
+  const totalItems = Number(totalRow?.total ?? 0);
+
+  return {
+    items: dishes.map((dish: DishRow) => toDishDto(dish, hasActiveSubscription(user))),
+    pagination: {
+      page: filters.page,
+      limit: filters.limit,
+      totalItems,
+      totalPages: Math.ceil(totalItems / filters.limit),
+    },
+  };
+};
 
 const toCategoryDto = (category: CategoryRow) => ({
   id: category.id,
@@ -233,49 +370,18 @@ export const deleteCategory = async (req: Request, res: Response, next: NextFunc
 export const getDishes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = await requireAuthenticatedUser(req.user);
-    const discounted = hasActiveSubscription(user);
+    const filters = parseDishListFilters(req.query, false);
+    res.json(await listDishes(user.id, filters));
+  } catch (error) {
+    next(error);
+  }
+};
 
-    const query = db<DishRow>('dishes as d')
-      .join<CategoryRow>('categories as c', 'c.id', 'd.category_id')
-      .select(
-        'd.id',
-        'd.category_id',
-        'd.name',
-        'd.description',
-        'd.image_url',
-        'd.base_price_cents',
-        'd.discount_price_cents',
-        'd.is_active',
-        'd.created_at',
-        'd.updated_at',
-        'd.deleted_at'
-      )
-      .whereNull('d.deleted_at')
-      .whereNull('c.deleted_at')
-      .orderBy('d.id', 'asc');
-
-    if (req.query.categoryId !== undefined) {
-      const categoryId = Number(req.query.categoryId);
-
-      if (!categoryId) {
-        throw new AppError('categoryId must be a number', 400);
-      }
-
-      query.andWhere('d.category_id', categoryId);
-    }
-
-    if (req.query.isActive !== undefined) {
-      const rawIsActive = String(req.query.isActive).toLowerCase();
-
-      if (!['true', 'false'].includes(rawIsActive)) {
-        throw new AppError('isActive must be true or false', 400);
-      }
-
-      query.andWhere('d.is_active', rawIsActive === 'true');
-    }
-
-    const dishes = await query;
-    res.json(dishes.map((dish) => toDishDto(dish as DishRow, discounted)));
+export const searchDishes = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const user = await requireAuthenticatedUser(req.user);
+    const filters = parseDishListFilters(req.query, true);
+    res.json(await listDishes(user.id, filters));
   } catch (error) {
     next(error);
   }

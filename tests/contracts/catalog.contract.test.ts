@@ -156,7 +156,28 @@ serialTest('DELETE /api/categories/:id deletes or archives a category', async ()
   }
 });
 
-serialTest('GET /api/dishes returns dishes with category and active filters', async () => {
+serialTest('GET /api/dishes returns a paginated list across all categories', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const expectedTotal = Number((await db('dishes').whereNull('deleted_at').count({ total: 'id' }).first())?.total ?? 0);
+    const response = await fetch(`${baseUrl}/api/dishes?page=1&limit=2`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.items.length, 2);
+    assert.equal(payload.pagination.page, 1);
+    assert.equal(payload.pagination.limit, 2);
+    assert.equal(payload.pagination.totalItems, expectedTotal);
+    assert.equal(payload.pagination.totalPages, Math.ceil(expectedTotal / 2));
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('GET /api/dishes preserves category and active filters in paginated response', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -166,12 +187,33 @@ serialTest('GET /api/dishes returns dishes with category and active filters', as
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.length, 1);
-    assert.equal(payload[0].name, 'Клюквенный морс');
-    assert.equal(payload[0].isActive, true);
-    assert.equal(payload[0].basePriceCents, 14900);
-    assert.equal(payload[0].discountPriceCents, 12900);
-    assert.equal(payload[0].priceCents, 12900);
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].name, 'Клюквенный морс');
+    assert.equal(payload.items[0].isActive, true);
+    assert.equal(payload.items[0].basePriceCents, 14900);
+    assert.equal(payload.items[0].discountPriceCents, 12900);
+    assert.equal(payload.items[0].priceCents, 12900);
+    assert.equal(payload.pagination.totalItems, 1);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('GET /api/dishes/search finds dishes by name and returns paginated results', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const seededDish = await db('dishes').where({ id: 1 }).first();
+    const searchTerm = String(seededDish.name).slice(0, 4);
+    const response = await fetch(`${baseUrl}/api/dishes/search?q=${encodeURIComponent(searchTerm)}&limit=1`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].id, seededDish.id);
+    assert.ok(payload.pagination.totalItems >= 1);
   } finally {
     await stopTestServer(server);
   }

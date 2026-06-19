@@ -9,6 +9,7 @@ import {
   getDishes,
   getDishesByCategory,
   getDishById,
+  searchDishes,
   updateCategory,
   updateDish,
 } from '../controllers/catalog.controller';
@@ -96,6 +97,32 @@ const router = Router();
  *         updatedAt:
  *           type: string
  *           format: date-time
+ *     PaginatedDishes:
+ *       type: object
+ *       required:
+ *         - items
+ *         - pagination
+ *       properties:
+ *         items:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Dish'
+ *         pagination:
+ *           type: object
+ *           required:
+ *             - page
+ *             - limit
+ *             - totalItems
+ *             - totalPages
+ *           properties:
+ *             page:
+ *               type: integer
+ *             limit:
+ *               type: integer
+ *             totalItems:
+ *               type: integer
+ *             totalPages:
+ *               type: integer
  *     CreateCategoryRequest:
  *       type: object
  *       required:
@@ -303,9 +330,7 @@ router.delete('/categories/:id', authenticateToken, checkRole(['manager', 'admin
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Dish'
+ *               $ref: '#/components/schemas/PaginatedDishes'
  */
 router.get('/categories/:id/dishes', authenticateToken, getDishesByCategory);
 
@@ -326,9 +351,26 @@ router.get('/categories/:id/dishes', authenticateToken, getDishesByCategory);
  *         name: isActive
  *         schema:
  *           type: boolean
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
- *         description: Dishes list
+ *         description: Paginated dishes list
  *         content:
  *           application/json:
  *             schema:
@@ -358,6 +400,45 @@ router.get('/categories/:id/dishes', authenticateToken, getDishesByCategory);
  */
 router.get('/dishes', authenticateToken, getDishes);
 router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), catalogImageUpload.single('image'), createDish);
+
+/**
+ * @swagger
+ * /dishes/search:
+ *   get:
+ *     summary: Search dishes by name or description
+ *     tags: [Catalog]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Paginated search results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaginatedDishes'
+ *       400:
+ *         description: Search query is required
+ */
+router.get('/dishes/search', authenticateToken, searchDishes);
 
 /**
  * @swagger
