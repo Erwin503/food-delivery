@@ -33,7 +33,10 @@ serialTest('GET /api/companies returns all visible companies for an authenticate
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const adminResponse = await fetch(`${baseUrl}/api/companies`, {
+    const adminResponse = await fetch(`${baseUrl}/api/companies?page=1&limit=2`, {
+      headers: { Authorization: `Bearer ${adminToken()}` },
+    });
+    const adminSecondPageResponse = await fetch(`${baseUrl}/api/companies?page=2&limit=2`, {
       headers: { Authorization: `Bearer ${adminToken()}` },
     });
     const managerResponse = await fetch(`${baseUrl}/api/companies`, {
@@ -44,16 +47,29 @@ serialTest('GET /api/companies returns all visible companies for an authenticate
     });
 
     assert.equal(adminResponse.status, 200);
+    assert.equal(adminSecondPageResponse.status, 200);
     assert.equal(managerResponse.status, 200);
     assert.equal(employeeResponse.status, 403);
 
     const adminPayload = await adminResponse.json();
+    const adminSecondPagePayload = await adminSecondPageResponse.json();
     const managerPayload = await managerResponse.json();
 
-    assert.equal(adminPayload.length, 3);
-    assert.equal(managerPayload.length, 1);
-    assert.equal(managerPayload[0].id, 1);
-    assert.equal(typeof adminPayload[0].debtCents, 'number');
+    assert.equal(adminPayload.items.length, 2);
+    assert.equal(adminPayload.pagination.page, 1);
+    assert.equal(adminPayload.pagination.limit, 2);
+    assert.equal(adminPayload.pagination.totalItems, 3);
+    assert.equal(adminPayload.pagination.totalPages, 2);
+    assert.equal(adminPayload.items[0].manager.email, 'manager.romashka@cook.local');
+    assert.equal('role' in adminPayload.items[0].manager, false);
+    assert.equal(adminSecondPagePayload.items.length, 1);
+    assert.equal(adminSecondPagePayload.items[0].id, 3);
+    assert.equal(adminSecondPagePayload.items[0].manager, null);
+    assert.equal(managerPayload.items.length, 1);
+    assert.equal(managerPayload.items[0].id, 1);
+    assert.equal(managerPayload.items[0].manager.email, 'manager.romashka@cook.local');
+    assert.equal('role' in managerPayload.items[0].manager, false);
+    assert.equal(typeof adminPayload.items[0].debtCents, 'number');
   } finally {
     await stopTestServer(server);
   }

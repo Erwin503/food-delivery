@@ -18,6 +18,8 @@ import {
 import { toUserDto } from '../utils/userMapper';
 
 const COMPANY_JOIN_CODE_TTL_SECONDS = 900;
+const DEFAULT_COMPANIES_PAGE_SIZE = 20;
+const MAX_COMPANIES_PAGE_SIZE = 100;
 
 const companyColumns = [
   'id',
@@ -38,6 +40,60 @@ const toCompanyDto = (company: CompanyModel) => ({
   createdAt: toIsoString(company.created_at),
   updatedAt: toIsoString(company.updated_at),
 });
+
+const toCompanyManagerDto = (manager: UserModel) => {
+  const { role: _role, ...managerDto } = toUserDto(manager);
+  return managerDto;
+};
+
+type CompanyManagerRow = UserModel & { manager_company_id: number };
+
+const parsePositiveIntegerQuery = (value: unknown, fieldName: string, defaultValue: number): number => {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new AppError(`${fieldName} must be a positive integer`, 400);
+  }
+
+  return parsed;
+};
+
+const loadCompanyManagers = async (companyIds: number[]): Promise<Map<number, UserModel>> => {
+  if (companyIds.length === 0) {
+    return new Map();
+  }
+
+  const managers = await db<CompanyManagerRow>('company_managers as cm')
+    .join<UserModel>('users as u', 'u.id', 'cm.user_id')
+    .select(
+      'cm.company_id as manager_company_id',
+      'u.id',
+      'u.email',
+      'u.role',
+      'u.company_id',
+      'u.password_hash',
+      'u.email_verified_at',
+      'u.full_name',
+      'u.phone',
+      'u.avatar_url',
+      'u.firebase_token',
+      'u.order_limit_cents',
+      'u.debt_cents',
+      'u.subscription_started_at',
+      'u.subscription_expires_at',
+      'u.created_at',
+      'u.updated_at',
+      'u.deleted_at'
+    )
+    .whereIn('cm.company_id', companyIds)
+    .whereNull('u.deleted_at');
+
+  return new Map(managers.map((manager) => [manager.manager_company_id, manager]));
+};
 
 const loadCompanyById = async (id: number): Promise<CompanyModel | undefined> =>
   db<CompanyModel>('companies')
@@ -122,6 +178,13 @@ const requireCompanyMember = async (companyId: number, userId: number): Promise<
 
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    const page = parsePositiveIntegerQuery(req.query.page, 'page', 1);
+    const limit = parsePositiveIntegerQuery(req.query.limit, 'limit', DEFAULT_COMPANIES_PAGE_SIZE);
+
+    if (limit > MAX_COMPANIES_PAGE_SIZE) {
+      throw new AppError(`limit must not exceed ${MAX_COMPANIES_PAGE_SIZE}`, 400);
+    }
+
     const query = db<CompanyModel>('companies')
       .select(...companyColumns)
       .whereNull('deleted_at')
@@ -129,15 +192,39 @@ export const getCompanies = async (req: AuthRequest, res: Response, next: NextFu
 
     if (req.user?.role !== 'admin') {
       if (!req.user?.companyId) {
-        res.json([]);
+        res.json({
+          items: [],
+          pagination: { page, limit, totalItems: 0, totalPages: 0 },
+        });
         return;
       }
 
       query.andWhere({ id: req.user.companyId });
     }
 
-    const companies = await query;
-    res.json(companies.map(toCompanyDto));
+    const [totalRow, companies] = await Promise.all([
+      query.clone().clearSelect().clearOrder().count<{ total: number | string }>({ total: 'id' }).first(),
+      query.clone().limit(limit).offset((page - 1) * limit),
+    ]);
+    const totalItems = Number(totalRow?.total ?? 0);
+    const managers = await loadCompanyManagers(companies.map((company) => company.id));
+
+    res.json({
+      items: companies.map((company) => {
+        const manager = managers.get(company.id);
+
+        return {
+          ...toCompanyDto(company),
+          manager: manager ? toCompanyManagerDto(manager) : null,
+        };
+      }),
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    });
   } catch (error) {
     next(error);
   }

@@ -1,3 +1,5 @@
+import { UserDto } from './user.dto';
+
 export interface CompanyDto {
   id: number;
   name: string;
@@ -6,6 +8,24 @@ export interface CompanyDto {
   debtCents: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type CompanyManagerSummaryDto = Omit<UserDto, 'role'>;
+
+export interface CompanyWithManagerDto extends CompanyDto {
+  manager: CompanyManagerSummaryDto | null;
+}
+
+export interface CompanyPaginationDto {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface PaginatedCompaniesDto {
+  items: CompanyWithManagerDto[];
+  pagination: CompanyPaginationDto;
 }
 
 export interface CreateCompanyDto {

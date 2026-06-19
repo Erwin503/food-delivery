@@ -52,6 +52,64 @@ const router = Router();
  *         updatedAt:
  *           type: string
  *           format: date-time
+ *     CompanyManager:
+ *       type: object
+ *       required:
+ *         - id
+ *         - email
+ *         - fullName
+ *       properties:
+ *         id:
+ *           type: integer
+ *         email:
+ *           type: string
+ *           format: email
+ *         fullName:
+ *           type: string
+ *           nullable: true
+ *         phone:
+ *           type: string
+ *           nullable: true
+ *         avatarUrl:
+ *           type: string
+ *           nullable: true
+ *     CompanyWithManager:
+ *       allOf:
+ *         - $ref: '#/components/schemas/Company'
+ *         - type: object
+ *           required:
+ *             - manager
+ *           properties:
+ *             manager:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/CompanyManager'
+ *               nullable: true
+ *     PaginatedCompanies:
+ *       type: object
+ *       required:
+ *         - items
+ *         - pagination
+ *       properties:
+ *         items:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/CompanyWithManager'
+ *         pagination:
+ *           type: object
+ *           required:
+ *             - page
+ *             - limit
+ *             - totalItems
+ *             - totalPages
+ *           properties:
+ *             page:
+ *               type: integer
+ *             limit:
+ *               type: integer
+ *             totalItems:
+ *               type: integer
+ *             totalPages:
+ *               type: integer
  *     CreateCompanyRequest:
  *       type: object
  *       required:
@@ -137,15 +195,27 @@ const router = Router();
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
  *     responses:
  *       200:
- *         description: Companies list
+ *         description: Paginated companies list with managers
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Company'
+ *               $ref: '#/components/schemas/PaginatedCompanies'
  *   post:
  *     summary: Create a company
  *     tags: [Companies]
