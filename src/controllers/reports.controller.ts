@@ -14,10 +14,15 @@ type TodayOrderRow = {
   company_id: number;
   company_name: string;
   user_name: string | null;
+  route_id: number;
   route_name: string;
   departure_at: string | Date;
   dish_name: string | null;
   qty: number | null;
+  base_price_cents: number | null;
+  discount_price_cents: number | null;
+  discounted_qty: number | null;
+  line_total_cents: number | null;
 };
 
 type TodayDishSummaryRow = {
@@ -29,9 +34,14 @@ type TodayDishSummaryRow = {
 type OrderDish = {
   dishName: string;
   qty: number;
+  basePriceCents: number;
+  discountPriceCents: number;
+  discountedQty: number;
+  lineTotalCents: number;
 };
 
 type AggregatedOrder = {
+  orderId: number;
   orderNumber: string | null;
   userName: string | null;
   status: string;
@@ -44,6 +54,13 @@ type AggregatedOrder = {
 type CompanyOrders = {
   companyName: string;
   orders: AggregatedOrder[];
+};
+
+type RouteOrders = {
+  routeId: number;
+  routeName: string;
+  departureAt: string | Date;
+  companies: CompanyOrders[];
 };
 
 type StickerOrder = AggregatedOrder & {
@@ -89,7 +106,7 @@ const formatTime = (value: string | Date): string =>
     minute: '2-digit',
   }).format(new Date(value));
 
-const formatMoney = (cents: number): string => `${(cents / 100).toFixed(2)} ₽`;
+const formatMoney = (cents: number): string => `${(cents / 100).toFixed(2)} \u20bd`;
 
 const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
   if (doc.y > minY) {
@@ -115,10 +132,15 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
       'c.id as company_id',
       'c.name as company_name',
       'u.full_name as user_name',
+      'r.id as route_id',
       'r.name as route_name',
       'r.departure_at',
       'd.name as dish_name',
-      'oi.qty'
+      'oi.qty',
+      'oi.base_price_cents',
+      'oi.discount_price_cents',
+      'oi.discounted_qty',
+      'oi.line_total_cents'
     )
     .whereNull('o.deleted_at')
     .whereNull('c.deleted_at')
@@ -126,6 +148,7 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
     .whereNull('r.deleted_at')
     .where('r.departure_at', '>=', start)
     .andWhere('r.departure_at', '<', end)
+    .orderBy('r.departure_at', 'asc')
     .orderBy('c.name', 'asc')
     .orderBy('u.full_name', 'asc')
     .orderBy('o.id', 'asc')
@@ -162,10 +185,11 @@ const aggregateOrdersByCompany = (rows: TodayOrderRow[]): CompanyOrders[] => {
       orders: [],
     };
 
-    let order = company.orders.find((item) => item.orderNumber === row.order_number);
+    let order = company.orders.find((item) => item.orderId === row.order_id);
 
     if (!order) {
       order = {
+        orderId: row.order_id,
         orderNumber: row.order_number,
         userName: row.user_name,
         status: row.status,
@@ -181,6 +205,10 @@ const aggregateOrdersByCompany = (rows: TodayOrderRow[]): CompanyOrders[] => {
       order.dishes.push({
         dishName: row.dish_name,
         qty: row.qty,
+        basePriceCents: Number(row.base_price_cents ?? 0),
+        discountPriceCents: Number(row.discount_price_cents ?? 0),
+        discountedQty: Number(row.discounted_qty ?? 0),
+        lineTotalCents: Number(row.line_total_cents ?? 0),
       });
     }
 
@@ -188,6 +216,56 @@ const aggregateOrdersByCompany = (rows: TodayOrderRow[]): CompanyOrders[] => {
   }
 
   return Array.from(companyMap.values());
+};
+
+const aggregateOrdersByRoute = (rows: TodayOrderRow[]): RouteOrders[] => {
+  const routes = new Map<number, RouteOrders>();
+
+  for (const row of rows) {
+    const route = routes.get(row.route_id) ?? {
+      routeId: row.route_id,
+      routeName: row.route_name,
+      departureAt: row.departure_at,
+      companies: [],
+    };
+    let company = route.companies.find((item) => item.companyName === row.company_name);
+
+    if (!company) {
+      company = { companyName: row.company_name, orders: [] };
+      route.companies.push(company);
+    }
+
+    let order = company.orders.find((item) => item.orderId === row.order_id);
+
+    if (!order) {
+      order = {
+        orderId: row.order_id,
+        orderNumber: row.order_number,
+        userName: row.user_name,
+        status: row.status,
+        routeName: row.route_name,
+        departureAt: row.departure_at,
+        totalCents: row.total_cents,
+        dishes: [],
+      };
+      company.orders.push(order);
+    }
+
+    if (row.dish_name && row.qty) {
+      order.dishes.push({
+        dishName: row.dish_name,
+        qty: row.qty,
+        basePriceCents: Number(row.base_price_cents ?? 0),
+        discountPriceCents: Number(row.discount_price_cents ?? 0),
+        discountedQty: Number(row.discounted_qty ?? 0),
+        lineTotalCents: Number(row.line_total_cents ?? 0),
+      });
+    }
+
+    routes.set(row.route_id, route);
+  }
+
+  return Array.from(routes.values());
 };
 
 const buildStickerOrders = (rows: TodayOrderRow[]): StickerOrder[] =>
@@ -220,7 +298,7 @@ const drawTableHeader = (
 };
 
 const buildOrdersReportPdf = async (): Promise<Buffer> => {
-  const companies = aggregateOrdersByCompany(await loadTodayOrders());
+  const routes = aggregateOrdersByRoute(await loadTodayOrders());
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Заказы на сегодня', { underline: true });
@@ -228,74 +306,113 @@ const buildOrdersReportPdf = async (): Promise<Buffer> => {
     doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
     doc.moveDown(0.8);
 
-    if (companies.length === 0) {
+    if (routes.length === 0) {
       doc.fontSize(14).text('На сегодня заказов нет.');
       return;
     }
 
     const columns = [
-      { label: 'Заказ', x: PAGE_MARGIN, width: 84 },
-      { label: 'Сотрудник', x: PAGE_MARGIN + 84, width: 116 },
-      { label: 'Статус', x: PAGE_MARGIN + 200, width: 90 },
-      { label: 'Рейс', x: PAGE_MARGIN + 290, width: 95 },
-      { label: 'Выезд', x: PAGE_MARGIN + 385, width: 65 },
-      { label: 'Состав', x: PAGE_MARGIN + 450, width: 96 },
-      { label: 'Сумма', x: PAGE_MARGIN + 546, width: 58 },
+      { label: 'Заказ', x: PAGE_MARGIN, width: 58 },
+      { label: 'Сотрудник', x: PAGE_MARGIN + 58, width: 93 },
+      { label: 'Компания', x: PAGE_MARGIN + 151, width: 74 },
+      { label: 'Статус', x: PAGE_MARGIN + 225, width: 62 },
+      { label: 'Состав', x: PAGE_MARGIN + 287, width: 150 },
+      { label: 'Сумма', x: PAGE_MARGIN + 437, width: 54 },
+      { label: 'Отм.', x: PAGE_MARGIN + 491, width: 32 },
     ];
+    const headerHeight = 26;
+    const rowHeight = 42;
 
-    for (const company of companies) {
-      ensurePageSpace(doc, doc.page.height - 180);
-      doc.fontSize(15).fillColor('#0F172A').text(company.companyName);
+    const drawRouteHeading = (route: RouteOrders, continuation = false) => {
+      const contentWidth = doc.page.width - PAGE_MARGIN * 2;
+      doc.fontSize(15).fillColor('#0F172A').text(
+        `Рейс: ${route.routeName}${continuation ? ' (продолжение)' : ''}`,
+        PAGE_MARGIN,
+        doc.y,
+        { width: contentWidth }
+      );
+      doc.fontSize(10).fillColor('#475569').text(
+        `Выезд: ${formatDateTime(route.departureAt)}`,
+        PAGE_MARGIN,
+        doc.y,
+        { width: contentWidth }
+      );
       doc.moveDown(0.25);
+    };
 
+    const drawCompanyHeading = (companyName: string) => {
+      doc.fontSize(12).fillColor('#0F172A').text(companyName, PAGE_MARGIN, doc.y, {
+        width: doc.page.width - PAGE_MARGIN * 2,
+      });
+      doc.moveDown(0.15);
+    };
+
+    const drawOrdersHeader = () => {
       const headerY = doc.y;
-      const headerHeight = 26;
-      const rowHeight = 42;
       drawTableHeader(doc, columns, headerY, headerHeight);
       doc.y = headerY + headerHeight;
+    };
 
-      company.orders.forEach((order, index) => {
-        ensurePageSpace(doc, doc.page.height - 120);
-        const rowY = doc.y;
+    for (const route of routes) {
+      ensurePageSpace(doc, doc.page.height - 180);
+      drawRouteHeading(route);
 
-        if (index % 2 === 1) {
-          doc.save();
-          doc.rect(PAGE_MARGIN, rowY, doc.page.width - PAGE_MARGIN * 2, rowHeight).fill('#F7F9FC');
-          doc.restore();
-        }
+      for (const company of route.companies) {
+        drawCompanyHeading(company.companyName);
+        drawOrdersHeader();
 
-        const cells = [
-          { x: PAGE_MARGIN, width: 84, text: order.orderNumber ?? 'н/д' },
-          { x: PAGE_MARGIN + 84, width: 116, text: order.userName ?? 'Не указан' },
-          { x: PAGE_MARGIN + 200, width: 90, text: ORDER_STATUS_LABELS[order.status] ?? order.status },
-          { x: PAGE_MARGIN + 290, width: 95, text: order.routeName },
-          { x: PAGE_MARGIN + 385, width: 65, text: formatTime(order.departureAt) },
-          {
-            x: PAGE_MARGIN + 450,
-            width: 96,
-            text: order.dishes.map((dish) => `${dish.dishName} x${dish.qty}`).join(', '),
-          },
-          { x: PAGE_MARGIN + 546, width: 58, text: formatMoney(order.totalCents) },
-        ];
+        company.orders.forEach((order, index) => {
+          if (doc.y + rowHeight > doc.page.height - PAGE_MARGIN) {
+            doc.addPage();
+            applyReportFont(doc);
+            drawRouteHeading(route, true);
+            drawCompanyHeading(company.companyName);
+            drawOrdersHeader();
+          }
 
-        doc.fillColor('#111111').fontSize(11);
+          const rowY = doc.y;
 
-        for (const cell of cells) {
-          doc.text(cell.text, cell.x + 4, rowY + 6, {
-            width: cell.width - 8,
-            height: rowHeight - 10,
-            ellipsis: true,
-          });
-        }
+          if (index % 2 === 1) {
+            doc.save();
+            doc.rect(PAGE_MARGIN, rowY, doc.page.width - PAGE_MARGIN * 2, rowHeight).fill('#F7F9FC');
+            doc.restore();
+          }
 
-        doc
-          .moveTo(PAGE_MARGIN, rowY + rowHeight)
-          .lineTo(doc.page.width - PAGE_MARGIN, rowY + rowHeight)
-          .stroke('#D6DEE8');
-        doc.y = rowY + rowHeight;
-      });
+          const cells = [
+            { x: columns[0].x, width: columns[0].width, text: order.orderNumber ?? 'н/д' },
+            { x: columns[1].x, width: columns[1].width, text: order.userName ?? 'Не указан' },
+            { x: columns[2].x, width: columns[2].width, text: company.companyName },
+            { x: columns[3].x, width: columns[3].width, text: ORDER_STATUS_LABELS[order.status] ?? order.status },
+            {
+              x: columns[4].x,
+              width: columns[4].width,
+              text: order.dishes.map((dish) => `${dish.dishName} x${dish.qty}`).join(', '),
+            },
+            { x: columns[5].x, width: columns[5].width, text: formatMoney(order.totalCents) },
+          ];
 
-      doc.moveDown(0.9);
+          doc.fillColor('#111111').fontSize(9);
+
+          for (const cell of cells) {
+            doc.text(cell.text, cell.x + 4, rowY + 6, {
+              width: cell.width - 8,
+              height: rowHeight - 10,
+              ellipsis: true,
+            });
+          }
+
+          doc.rect(columns[6].x + 10, rowY + 14, 12, 12).lineWidth(1).stroke('#475569');
+          doc
+            .moveTo(PAGE_MARGIN, rowY + rowHeight)
+            .lineTo(doc.page.width - PAGE_MARGIN, rowY + rowHeight)
+            .stroke('#D6DEE8');
+          doc.y = rowY + rowHeight;
+        });
+
+        doc.moveDown(0.6);
+      }
+
+      doc.moveDown(0.4);
     }
   });
 };
@@ -351,6 +468,23 @@ const buildDishesReportPdf = async (): Promise<Buffer> => {
   });
 };
 
+const formatDishPriceBreakdown = (dish: OrderDish): string => {
+  const discountedQty = Math.min(Math.max(dish.discountedQty, 0), dish.qty);
+  const standardQty = Math.max(dish.qty - discountedQty, 0);
+  const parts: string[] = [];
+
+  if (discountedQty > 0) {
+    parts.push(`${discountedQty} x ${formatMoney(dish.discountPriceCents)}`);
+  }
+
+  if (standardQty > 0) {
+    parts.push(`${standardQty} x ${formatMoney(dish.basePriceCents)}`);
+  }
+
+  const calculatedTotal = discountedQty * dish.discountPriceCents + standardQty * dish.basePriceCents;
+  return `${parts.join(' + ')} = ${formatMoney(dish.lineTotalCents || calculatedTotal)}`;
+};
+
 const drawStickerCell = (
   doc: PDFKit.PDFDocument,
   x: number,
@@ -379,15 +513,42 @@ const drawStickerCell = (
   doc.moveTo(x + 10, y + 64).lineTo(x + width - 10, y + 64).stroke('#CBD5E1');
   doc.fontSize(11).fillColor('#0F172A').text('Состав:', x + 10, y + 70);
 
-  const itemsText = order.dishes.length
-    ? order.dishes.map((dish) => `${dish.dishName} x${dish.qty}`).join(', ')
-    : 'Нет позиций';
+  if (order.dishes.length === 0) {
+    doc.fontSize(10).fillColor('#111111').text('Нет позиций', x + 10, y + 88);
+    doc.restore();
+    return;
+  }
 
-  doc.fontSize(10).fillColor('#111111').text(itemsText, x + 10, y + 86, {
-    width: width - 20,
-    height: height - 96,
-    ellipsis: true,
+  const itemRowHeight = 28;
+  const maxRows = Math.max(1, Math.floor((height - 94) / itemRowHeight));
+  const visibleDishes =
+    order.dishes.length > maxRows ? order.dishes.slice(0, maxRows - 1) : order.dishes;
+
+  visibleDishes.forEach((dish, index) => {
+    const itemY = y + 86 + index * itemRowHeight;
+
+    doc.rect(x + 10, itemY + 4, 10, 10).lineWidth(1).stroke('#475569');
+    doc.fontSize(9).fillColor('#111111').text(`${dish.qty} x ${dish.dishName}`, x + 26, itemY, {
+      width: width - 36,
+      height: 11,
+      ellipsis: true,
+    });
+    doc.fontSize(8).fillColor('#475569').text(formatDishPriceBreakdown(dish), x + 26, itemY + 11, {
+      width: width - 36,
+      height: 11,
+      ellipsis: true,
+    });
   });
+
+  if (order.dishes.length > maxRows) {
+    const itemY = y + 86 + visibleDishes.length * itemRowHeight;
+    doc.rect(x + 10, itemY + 4, 10, 10).fill('#FFFFFF').stroke('#475569');
+    doc.fontSize(8).fillColor('#475569').text(`Ещё позиций: ${order.dishes.length - maxRows + 1}`, x + 26, itemY + 3, {
+      width: width - 36,
+      height: 12,
+      ellipsis: true,
+    });
+  }
   doc.restore();
 };
 
@@ -482,8 +643,8 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
       company_id: 1,
       status: 'created',
       items: [
-        { dish_id: 1, qty: 2, price_cents: 59900 },
-        { dish_id: 4, qty: 1, price_cents: 14900 },
+        { dish_id: 1, qty: 2, price_cents: 53900, discounted_qty: 1, line_total_cents: 113800 },
+        { dish_id: 4, qty: 1, price_cents: 14900, discounted_qty: 0, line_total_cents: 14900 },
       ],
     },
     {
@@ -491,7 +652,7 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
       user_id: 5,
       company_id: 1,
       status: 'paid',
-      items: [{ dish_id: 2, qty: 1, price_cents: 74900 }],
+      items: [{ dish_id: 2, qty: 1, price_cents: 74900, discounted_qty: 0, line_total_cents: 74900 }],
     },
     {
       order_number: `${testOrderPrefix}-003`,
@@ -499,14 +660,14 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
       company_id: 2,
       status: 'paid',
       items: [
-        { dish_id: 2, qty: 2, price_cents: 74900 },
-        { dish_id: 4, qty: 3, price_cents: 14900 },
+        { dish_id: 2, qty: 2, price_cents: 74900, discounted_qty: 0, line_total_cents: 149800 },
+        { dish_id: 4, qty: 3, price_cents: 14900, discounted_qty: 0, line_total_cents: 44700 },
       ],
     },
   ] as const;
 
   for (const testOrder of testOrders) {
-    const subtotal = testOrder.items.reduce((sum, item) => sum + item.qty * item.price_cents, 0);
+    const subtotal = testOrder.items.reduce((sum, item) => sum + item.line_total_cents, 0);
 
     const orderInsert = await db('orders').insert({
       order_number: testOrder.order_number,
@@ -553,8 +714,8 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
           price_cents: item.price_cents,
           base_price_cents: Number(dish.base_price_cents),
           discount_price_cents: Number(dish.discount_price_cents),
-          discounted_qty: 0,
-          line_total_cents: item.qty * item.price_cents,
+          discounted_qty: item.discounted_qty,
+          line_total_cents: item.line_total_cents,
           created_at: now,
           updated_at: now,
         };
