@@ -9,4 +9,5 @@ export interface DishModel extends SoftDeleteColumns {
   base_price_cents: number;
   discount_price_cents: number;
   is_active: boolean;
+  available_weekdays?: number[] | string;
 }

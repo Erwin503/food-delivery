@@ -91,6 +91,13 @@ const router = Router();
  *         isActive:
  *           type: boolean
  *           example: true
+ *         availableWeekdays:
+ *           type: array
+ *           description: 'Admin-only. ISO weekdays: 1 is Monday, 7 is Sunday.'
+ *           items:
+ *             type: integer
+ *             minimum: 1
+ *             maximum: 7
  *         createdAt:
  *           type: string
  *           format: date-time
@@ -178,6 +185,13 @@ const router = Router();
  *         isActive:
  *           type: boolean
  *           example: true
+ *         availableWeekdays:
+ *           type: array
+ *           description: Defaults to all weekdays when omitted on creation.
+ *           items:
+ *             type: integer
+ *             minimum: 1
+ *             maximum: 7
  *     UpdateDishRequest:
  *       type: object
  *       properties:
@@ -197,6 +211,12 @@ const router = Router();
  *           type: integer
  *         isActive:
  *           type: boolean
+ *         availableWeekdays:
+ *           type: array
+ *           items:
+ *             type: integer
+ *             minimum: 1
+ *             maximum: 7
  */
 
 /**

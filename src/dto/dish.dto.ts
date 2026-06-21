@@ -8,6 +8,7 @@ export interface DishDto {
   discountPriceCents: number;
   priceCents: number;
   isActive: boolean;
+  availableWeekdays?: number[];
   createdAt: string;
   updatedAt: string;
 }
@@ -19,6 +20,7 @@ export interface CreateDishDto {
   basePriceCents: number;
   discountPriceCents: number;
   isActive?: boolean;
+  availableWeekdays?: number[];
 }
 
 export interface UpdateDishDto {
@@ -28,6 +30,7 @@ export interface UpdateDishDto {
   basePriceCents?: number;
   discountPriceCents?: number;
   isActive?: boolean;
+  availableWeekdays?: number[];
 }
 
 export interface DishPaginationDto {

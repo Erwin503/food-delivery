@@ -23,6 +23,7 @@ const dishColumns = [
   'base_price_cents',
   'discount_price_cents',
   'is_active',
+  'available_weekdays',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -40,6 +41,8 @@ type DishListFilters = {
 
 const DEFAULT_DISHES_PAGE_SIZE = 20;
 const MAX_DISHES_PAGE_SIZE = 100;
+const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+const BUSINESS_TIME_ZONE = process.env.BUSINESS_TIME_ZONE?.trim() || 'Europe/Moscow';
 
 const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
@@ -47,6 +50,55 @@ const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
 const isOmittedValue = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
 
+const parseAvailableWeekdays = (value: unknown): number[] => {
+  let parsed = value;
+
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      throw new AppError('availableWeekdays must be an array of numbers from 1 to 7', 400);
+    }
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new AppError('availableWeekdays must be an array of numbers from 1 to 7', 400);
+  }
+
+  const weekdays = Array.from(new Set(parsed.map(Number))).sort((left, right) => left - right);
+
+  if (weekdays.length === 0 || weekdays.some((weekday) => !Number.isInteger(weekday) || weekday < 1 || weekday > 7)) {
+    throw new AppError('availableWeekdays must contain numbers from 1 to 7', 400);
+  }
+
+  return weekdays;
+};
+
+const readAvailableWeekdays = (value: unknown): number[] => {
+  try {
+    return parseAvailableWeekdays(value);
+  } catch {
+    return ALL_WEEKDAYS;
+  }
+};
+
+const getCurrentIsoWeekday = (): number => {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    timeZone: BUSINESS_TIME_ZONE,
+  }).format(new Date());
+  const weekdayMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+
+  return weekdayMap[weekday] ?? 1;
+};
 const parsePositiveIntegerQuery = (value: unknown, fieldName: string, defaultValue: number): number => {
   if (value === undefined) {
     return defaultValue;
@@ -108,7 +160,7 @@ const parseDishListFilters = (query: Request['query'], requireQuery: boolean): D
   return filters;
 };
 
-const buildDishesListQuery = (filters: DishListFilters): Knex.QueryBuilder => {
+const buildDishesListQuery = (filters: DishListFilters, includeUnavailableDishes: boolean): Knex.QueryBuilder => {
   const query = db<DishRow>('dishes as d')
     .join<CategoryRow>('categories as c', 'c.id', 'd.category_id')
     .whereNull('d.deleted_at')
@@ -122,6 +174,12 @@ const buildDishesListQuery = (filters: DishListFilters): Knex.QueryBuilder => {
     query.andWhere('d.is_active', filters.isActive);
   }
 
+  if (!includeUnavailableDishes) {
+    query
+      .andWhere('d.is_active', true)
+      .andWhereRaw('JSON_CONTAINS(d.available_weekdays, CAST(? AS JSON))', [String(getCurrentIsoWeekday())]);
+  }
+
   if (filters.query) {
     const pattern = `%${filters.query}%`;
     query.andWhere((builder) => {
@@ -132,9 +190,9 @@ const buildDishesListQuery = (filters: DishListFilters): Knex.QueryBuilder => {
   return query;
 };
 
-const listDishes = async (userId: number | undefined, filters: DishListFilters) => {
-  const user = await loadUserSubscription(userId);
-  const query = buildDishesListQuery(filters);
+const listDishes = async (user: UserModel, filters: DishListFilters) => {
+  const includeUnavailableDishes = user.role === 'admin';
+  const query = buildDishesListQuery(filters, includeUnavailableDishes);
   const offset = (filters.page - 1) * filters.limit;
 
   const [totalRow, dishes] = await Promise.all([
@@ -150,6 +208,7 @@ const listDishes = async (userId: number | undefined, filters: DishListFilters) 
         'd.base_price_cents',
         'd.discount_price_cents',
         'd.is_active',
+        'd.available_weekdays',
         'd.created_at',
         'd.updated_at',
         'd.deleted_at'
@@ -162,7 +221,9 @@ const listDishes = async (userId: number | undefined, filters: DishListFilters) 
   const totalItems = Number(totalRow?.total ?? 0);
 
   return {
-    items: dishes.map((dish: DishRow) => toDishDto(dish, hasActiveSubscription(user))),
+    items: dishes.map((dish: DishRow) =>
+      toDishDto(dish, hasActiveSubscription(user), includeUnavailableDishes)
+    ),
     pagination: {
       page: filters.page,
       limit: filters.limit,
@@ -181,7 +242,7 @@ const toCategoryDto = (category: CategoryRow) => ({
   updatedAt: toIsoString(category.updated_at),
 });
 
-const toDishDto = (dish: DishRow, discounted: boolean) => ({
+const toDishDto = (dish: DishRow, discounted: boolean, includeAvailableWeekdays = false) => ({
   id: dish.id,
   categoryId: dish.category_id,
   name: dish.name,
@@ -191,6 +252,7 @@ const toDishDto = (dish: DishRow, discounted: boolean) => ({
   discountPriceCents: dish.discount_price_cents,
   priceCents: discounted ? dish.discount_price_cents : dish.base_price_cents,
   isActive: Boolean(dish.is_active),
+  ...(includeAvailableWeekdays ? { availableWeekdays: readAvailableWeekdays(dish.available_weekdays) } : {}),
   createdAt: toIsoString(dish.created_at),
   updatedAt: toIsoString(dish.updated_at),
 });
@@ -371,7 +433,7 @@ export const getDishes = async (req: AuthRequest, res: Response, next: NextFunct
   try {
     const user = await requireAuthenticatedUser(req.user);
     const filters = parseDishListFilters(req.query, false);
-    res.json(await listDishes(user.id, filters));
+    res.json(await listDishes(user, filters));
   } catch (error) {
     next(error);
   }
@@ -381,7 +443,7 @@ export const searchDishes = async (req: AuthRequest, res: Response, next: NextFu
   try {
     const user = await requireAuthenticatedUser(req.user);
     const filters = parseDishListFilters(req.query, true);
-    res.json(await listDishes(user.id, filters));
+    res.json(await listDishes(user, filters));
   } catch (error) {
     next(error);
   }
@@ -391,9 +453,9 @@ export const getDishById = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const dishId = parseRequiredId(req.params.id, 'Dish id');
 
-    const user = await loadUserSubscription(req.user?.id);
+    const user = await requireAuthenticatedUser(req.user);
     const dish = await requireDish(dishId);
-    res.json(toDishDto(dish, hasActiveSubscription(user)));
+    res.json(toDishDto(dish, hasActiveSubscription(user), user.role === 'admin'));
   } catch (error) {
     next(error);
   }
@@ -405,14 +467,24 @@ export const getDishesByCategory = async (req: AuthRequest, res: Response, next:
 
     await requireCategory(categoryId);
 
-    const user = await loadUserSubscription(req.user?.id);
-    const dishes = await db<DishRow>('dishes')
+    const user = await requireAuthenticatedUser(req.user);
+    const includeUnavailableDishes = user.role === 'admin';
+    const query = db<DishRow>('dishes')
       .select(...dishColumns)
       .where({ category_id: categoryId })
       .whereNull('deleted_at')
       .orderBy('id', 'asc');
 
-    res.json(dishes.map((dish) => toDishDto(dish, hasActiveSubscription(user))));
+    if (!includeUnavailableDishes) {
+      query
+        .andWhere('is_active', true)
+        .andWhereRaw('JSON_CONTAINS(available_weekdays, CAST(? AS JSON))', [String(getCurrentIsoWeekday())]);
+    }
+
+    const dishes = await query;
+    res.json(
+      dishes.map((dish) => toDishDto(dish, hasActiveSubscription(user), includeUnavailableDishes))
+    );
   } catch (error) {
     next(error);
   }
@@ -427,6 +499,9 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
     const basePriceCents = Number(req.body.basePriceCents);
     const discountPriceCents = Number(req.body.discountPriceCents);
     const isActive = req.body.isActive === undefined ? true : Boolean(req.body.isActive);
+    const availableWeekdays = isOmittedValue(req.body.availableWeekdays)
+      ? ALL_WEEKDAYS
+      : parseAvailableWeekdays(req.body.availableWeekdays);
 
     if (
       !categoryId ||
@@ -452,6 +527,7 @@ export const createDish = async (req: Request, res: Response, next: NextFunction
       base_price_cents: basePriceCents,
       discount_price_cents: discountPriceCents,
       is_active: isActive,
+      available_weekdays: JSON.stringify(availableWeekdays),
       created_at: now,
       updated_at: now,
       deleted_at: null,
@@ -526,6 +602,10 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
 
     if (!isOmittedValue(req.body.isActive)) {
       patch.is_active = Boolean(req.body.isActive);
+    }
+
+    if (!isOmittedValue(req.body.availableWeekdays)) {
+      patch.available_weekdays = JSON.stringify(parseAvailableWeekdays(req.body.availableWeekdays));
     }
 
     const nextBasePriceCents =

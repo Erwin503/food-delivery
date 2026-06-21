@@ -14,6 +14,14 @@ const employeeToken = () =>
 const managerToken = () =>
   generateToken({ id: 2, email: 'manager.romashka@cook.local', role: 'manager', companyId: 1 });
 
+const adminToken = () =>
+  generateToken({ id: 1, email: 'admin@cook.local', role: 'admin', companyId: null });
+
+const getTodayWeekday = (): number => {
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Europe/Moscow' }).format(new Date());
+  return { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[weekday] as number;
+};
+
 test.beforeEach(async () => {
   await lockAndSeedDb(db);
 });
@@ -160,7 +168,7 @@ serialTest('GET /api/dishes returns a paginated list across all categories', asy
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const expectedTotal = Number((await db('dishes').whereNull('deleted_at').count({ total: 'id' }).first())?.total ?? 0);
+    const expectedTotal = Number((await db('dishes').whereNull('deleted_at').where({ is_active: true }).count({ total: 'id' }).first())?.total ?? 0);
     const response = await fetch(`${baseUrl}/api/dishes?page=1&limit=2`, {
       headers: { Authorization: `Bearer ${employeeToken()}` },
     });
@@ -219,6 +227,52 @@ serialTest('GET /api/dishes/search finds dishes by name and returns paginated re
   }
 });
 
+serialTest('GET /api/dishes hides unavailable weekdays from employees and managers but exposes them to admins', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const today = getTodayWeekday();
+    const unavailableDay = today === 1 ? 2 : 1;
+    await db('dishes').where({ id: 5 }).update({
+      is_active: true,
+      available_weekdays: JSON.stringify([unavailableDay]),
+    });
+
+    const managerResponse = await fetch(`${baseUrl}/api/dishes?limit=20`, {
+      headers: { Authorization: `Bearer ${managerToken()}` },
+    });
+    const adminResponse = await fetch(`${baseUrl}/api/dishes?limit=20`, {
+      headers: { Authorization: `Bearer ${adminToken()}` },
+    });
+    const managerCategoryResponse = await fetch(`${baseUrl}/api/categories/3/dishes`, {
+      headers: { Authorization: `Bearer ${managerToken()}` },
+    });
+    const adminCategoryResponse = await fetch(`${baseUrl}/api/categories/3/dishes`, {
+      headers: { Authorization: `Bearer ${adminToken()}` },
+    });
+
+    assert.equal(managerResponse.status, 200);
+    assert.equal(adminResponse.status, 200);
+    assert.equal(managerCategoryResponse.status, 200);
+    assert.equal(adminCategoryResponse.status, 200);
+
+    const managerPayload = await managerResponse.json();
+    const adminPayload = await adminResponse.json();
+    const managerCategoryPayload = await managerCategoryResponse.json();
+    const adminCategoryPayload = await adminCategoryResponse.json();
+
+    assert.equal(managerPayload.items.some((dish: { id: number }) => dish.id === 5), false);
+    assert.equal(managerPayload.items.some((dish: { availableWeekdays?: number[] }) => 'availableWeekdays' in dish), false);
+    assert.equal(managerCategoryPayload.some((dish: { id: number }) => dish.id === 5), false);
+
+    const adminDish = adminPayload.items.find((dish: { id: number }) => dish.id === 5);
+    const adminCategoryDish = adminCategoryPayload.find((dish: { id: number }) => dish.id === 5);
+    assert.deepEqual(adminDish.availableWeekdays, [unavailableDay]);
+    assert.deepEqual(adminCategoryDish.availableWeekdays, [unavailableDay]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
 serialTest('GET /api/dishes/:id returns a dish by id', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -267,6 +321,7 @@ serialTest('POST /api/dishes creates a dish for manager or admin', async () => {
     form.set('basePriceCents', '52900');
     form.set('discountPriceCents', '47900');
     form.set('isActive', 'true');
+    // Omitted availableWeekdays must default to every day.
     form.set('image', new Blob(['fake-image'], { type: 'image/png' }), 'dish.png');
 
     const response = await fetch(`${baseUrl}/api/dishes`, {
@@ -286,6 +341,8 @@ serialTest('POST /api/dishes creates a dish for manager or admin', async () => {
     assert.ok(dish);
     assert.equal(dish.category_id, 2);
     assert.equal(typeof dish.image_url, 'string');
+    const weekdays = typeof dish.available_weekdays === 'string' ? JSON.parse(dish.available_weekdays) : dish.available_weekdays;
+    assert.deepEqual(weekdays, [1, 2, 3, 4, 5, 6, 7]);
   } finally {
     await stopTestServer(server);
   }
@@ -306,6 +363,7 @@ serialTest('PUT /api/dishes/:id partially updates a dish', async () => {
         basePriceCents: 13900,
         discountPriceCents: 11900,
         isActive: true,
+        availableWeekdays: [1, 3, 5],
       }),
     });
 
@@ -316,6 +374,9 @@ serialTest('PUT /api/dishes/:id partially updates a dish', async () => {
     assert.equal(payload.basePriceCents, 13900);
     assert.equal(payload.discountPriceCents, 11900);
     assert.equal(payload.isActive, true);
+    const dish = await db('dishes').where({ id: 5 }).first();
+    const weekdays = typeof dish.available_weekdays === 'string' ? JSON.parse(dish.available_weekdays) : dish.available_weekdays;
+    assert.deepEqual(weekdays, [1, 3, 5]);
   } finally {
     await stopTestServer(server);
   }
