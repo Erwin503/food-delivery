@@ -80,7 +80,6 @@ const loadCompanyManagers = async (companyIds: number[]): Promise<Map<number, Us
       'u.full_name',
       'u.phone',
       'u.avatar_url',
-      'u.firebase_token',
       'u.order_limit_cents',
       'u.debt_cents',
       'u.subscription_started_at',

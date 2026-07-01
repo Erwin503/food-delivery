@@ -407,6 +407,52 @@ serialTest('PUT /api/dishes/:id ignores omitted fields and keeps current values'
   }
 });
 
+serialTest('POST /api/dishes/:id/image rejects manager role', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const form = new FormData();
+    form.set('image', new Blob(['replacement-image'], { type: 'image/png' }), 'dish.png');
+
+    const response = await fetch(`${baseUrl}/api/dishes/1/image`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+      },
+      body: form,
+    });
+
+    assert.equal(response.status, 403);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+serialTest('POST /api/dishes/:id/image uploads or replaces a dish image', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const form = new FormData();
+    form.set('image', new Blob(['replacement-image'], { type: 'image/webp' }), 'dish.webp');
+
+    const response = await fetch(`${baseUrl}/api/dishes/1/image`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+      },
+      body: form,
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.id, 1);
+    assert.match(payload.imageUrl, /^\/uploads\/catalog\/.+\.webp$/);
+
+    const dish = await db('dishes').where({ id: 1 }).first();
+    assert.equal(dish.image_url, payload.imageUrl);
+  } finally {
+    await stopTestServer(server);
+  }
+});
 serialTest('DELETE /api/dishes/:id deletes or archives a dish', async () => {
   const { server, baseUrl } = await startTestServer();
 

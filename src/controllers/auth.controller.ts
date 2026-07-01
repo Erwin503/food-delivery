@@ -25,12 +25,40 @@ const LOGIN_CODE_TTL_SECONDS = 300;
 const PASSWORD_RESET_TTL_SECONDS = 900;
 const EMAIL_VERIFICATION_TTL_SECONDS = 900;
 
-const issueAuthResponse = (res: Response, user: UserModel) => {
+const normalizeFirebaseToken = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const token = String(value).trim();
+
+  if (token.length > 2048) {
+    throw new AppError('Firebase token is too long', 400);
+  }
+
+  return token || null;
+};
+
+const issueAuthResponse = async (
+  res: Response,
+  user: UserModel,
+  firebaseTokenRaw?: unknown
+): Promise<void> => {
+  const now = new Date();
+  const firebaseToken = normalizeFirebaseToken(firebaseTokenRaw);
+  const [sessionId] = await db('auth_sessions').insert({
+    user_id: user.id,
+    firebase_token: firebaseToken,
+    created_at: now,
+    updated_at: now,
+  });
+
   const token = generateToken({
     id: user.id,
     email: user.email,
     role: user.role,
     companyId: user.company_id,
+    sessionId: Number(sessionId),
   });
 
   res.json({
@@ -158,7 +186,7 @@ export const confirmSignup = async (req: Request, res: Response, next: NextFunct
       throw new AppError('User not found', 404);
     }
 
-    issueAuthResponse(res, user);
+    await issueAuthResponse(res, user);
   } catch (error) {
     next(error);
   }
@@ -250,7 +278,7 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
       consumed_at: verifiedAt,
     });
 
-    issueAuthResponse(res, user);
+    await issueAuthResponse(res, user, req.body.firebaseToken);
   } catch (error) {
     next(error);
   }
@@ -275,7 +303,7 @@ export const passwordLogin = async (req: Request, res: Response, next: NextFunct
       throw new AppError('Email is not verified', 403);
     }
 
-    issueAuthResponse(res, user);
+    await issueAuthResponse(res, user, req.body.firebaseToken);
   } catch (error) {
     next(error);
   }
@@ -321,19 +349,38 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
 export const updatePushToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = await requireAuthenticatedUser(req.user);
-    const firebaseTokenRaw = req.body.firebaseToken;
-    const firebaseToken =
-      firebaseTokenRaw === null || firebaseTokenRaw === undefined
-        ? null
-        : String(firebaseTokenRaw).trim() || null;
+    const sessionId = req.user?.sessionId;
 
-    await db('users').where({ id: user.id }).update({
-      firebase_token: firebaseToken,
-      updated_at: new Date(),
-    });
+    if (!sessionId) {
+      throw new AppError('Session-bound token is required', 401);
+    }
 
-    const updatedUser = await requireAuthenticatedUser(req.user);
-    res.json(toUserDto(updatedUser));
+    const updated = await db('auth_sessions')
+      .where({ id: sessionId, user_id: user.id })
+      .update({
+        firebase_token: normalizeFirebaseToken(req.body.firebaseToken),
+        updated_at: new Date(),
+      });
+
+    if (!updated) {
+      throw new AppError('Session not found', 401);
+    }
+
+    res.json(toUserDto(user));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const logout = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = req.user?.sessionId;
+
+    if (sessionId) {
+      await db('auth_sessions').where({ id: sessionId, user_id: req.user?.id }).del();
+    }
+
+    res.status(204).send();
   } catch (error) {
     next(error);
   }
@@ -470,7 +517,7 @@ export const confirmPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('User not found', 404);
     }
 
-    issueAuthResponse(res, updatedUser);
+    await issueAuthResponse(res, updatedUser);
   } catch (error) {
     next(error);
   }

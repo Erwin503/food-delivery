@@ -5,4 +5,5 @@ export interface AuthTokenPayload {
   email: string;
   role: UserRoleModel;
   companyId: number | null;
+  sessionId?: number;
 }

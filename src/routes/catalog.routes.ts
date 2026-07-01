@@ -10,6 +10,7 @@ import {
   getDishesByCategory,
   getDishById,
   searchDishes,
+  uploadDishImage,
   updateCategory,
   updateDish,
 } from '../controllers/catalog.controller';
@@ -460,6 +461,46 @@ router.post('/dishes', authenticateToken, checkRole(['manager', 'admin']), catal
  */
 router.get('/dishes/search', authenticateToken, searchDishes);
 
+/**
+ * @swagger
+ * /dishes/{id}/image:
+ *   post:
+ *     summary: Upload or replace a dish image
+ *     tags: [Catalog]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - image
+ *             properties:
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image file in jpeg, png, webp, or gif format, up to 5 MB
+ *     responses:
+ *       200:
+ *         description: Dish image uploaded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Dish'
+ *       400:
+ *         description: Image file is required or invalid
+ *       403:
+ *         description: Forbidden
+ */
+router.post('/dishes/:id/image', authenticateToken, checkRole(['admin']), catalogImageUpload.single('image'), uploadDishImage);
 /**
  * @swagger
  * /dishes/{id}:

@@ -630,6 +630,27 @@ export const updateDish = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+export const uploadDishImage = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const dishId = parseRequiredId(req.params.id, 'Dish id');
+
+    await requireDish(dishId);
+
+    if (!req.file) {
+      throw new AppError('image file is required', 400);
+    }
+
+    await db('dishes').where({ id: dishId }).update({
+      image_url: buildUploadedFileUrl(req.file.filename),
+      updated_at: new Date(),
+    });
+
+    const dish = await requireDish(dishId);
+    res.json(toDishDto(dish, false));
+  } catch (error) {
+    next(error);
+  }
+};
 export const deleteDish = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const dishId = parseRequiredId(req.params.id, 'Dish id');

@@ -12,7 +12,6 @@ export const USER_COLUMNS = [
   'full_name',
   'phone',
   'avatar_url',
-  'firebase_token',
   'order_limit_cents',
   'debt_cents',
   'subscription_started_at',

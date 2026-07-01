@@ -7,6 +7,7 @@ import {
   getProfile,
   loginStep1,
   loginStep2,
+  logout,
   passwordLogin,
   promoteUser,
   requestPasswordReset,
@@ -136,6 +137,10 @@ const router = Router();
  *         code:
  *           type: string
  *           example: "1234"
+ *         firebaseToken:
+ *           type: string
+ *           nullable: true
+ *           description: Optional FCM token for the newly created session.
  *     PasswordLoginRequest:
  *       type: object
  *       required:
@@ -149,6 +154,10 @@ const router = Router();
  *           type: string
  *           format: password
  *           example: Password123!
+ *         firebaseToken:
+ *           type: string
+ *           nullable: true
+ *           description: Optional FCM token for the newly created session.
  *     UpdateProfileRequest:
  *       type: object
  *       properties:
@@ -178,7 +187,7 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           example: eXamplEFcmT0ken123
- *           description: Firebase registration token. Pass null or empty string to clear it.
+ *           description: Firebase registration token for the current session. Pass null or empty string to clear it.
  *     SetPasswordRequest:
  *       type: object
  *       required:
@@ -491,6 +500,26 @@ router.post('/login/password', passwordLoginLimiter, passwordLogin);
 
 /**
  * @swagger
+ * /auth/logout:
+ *   post:
+ *     summary: End the current session and stop its push notifications
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       204:
+ *         description: Session removed
+ *       401:
+ *         description: Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/logout', authenticateToken, logout);
+
+/**
+ * @swagger
  * /auth/profile:
  *   get:
  *     summary: Get current user profile
@@ -550,7 +579,7 @@ router.put('/profile', authenticateToken, avatarImageUpload.single('avatar'), up
  * @swagger
  * /auth/push-token:
  *   put:
- *     summary: Save or clear current user Firebase push token
+ *     summary: Save or clear Firebase push token for current session
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []

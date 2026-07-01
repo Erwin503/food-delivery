@@ -1,6 +1,7 @@
 export * from './auth-login-code.model';
 export * from './auth-email-verification-code.model';
 export * from './auth-password-reset-code.model';
+export * from './auth-session.model';
 export * from './category.model';
 export * from './common.model';
 export * from './company-manager.model';

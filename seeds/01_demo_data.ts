@@ -18,6 +18,7 @@ export async function seed(knex: Knex): Promise<void> {
   await knex.raw('TRUNCATE TABLE auth_email_verification_codes');
   await knex.raw('TRUNCATE TABLE auth_password_reset_codes');
   await knex.raw('TRUNCATE TABLE auth_login_codes');
+  await knex.raw('TRUNCATE TABLE auth_sessions');
   await knex.raw('TRUNCATE TABLE dishes');
   await knex.raw('TRUNCATE TABLE categories');
   await knex.raw('TRUNCATE TABLE routes');
@@ -81,7 +82,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Системный администратор',
       phone: '+79990000001',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 0,
       debt_cents: 0,
       subscription_started_at: null,
@@ -100,7 +100,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Анна Смирнова',
       phone: '+79990000002',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 180000,
       debt_cents: 0,
       subscription_started_at: toSqlDateTime(activeSubscriptionStartedAt),
@@ -119,7 +118,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Михаил Петров',
       phone: '+79990000003',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 120000,
       debt_cents: 0,
       subscription_started_at: null,
@@ -138,7 +136,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Иван Иванов',
       phone: '+79990000004',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 100,
       debt_cents: 0,
       subscription_started_at: toSqlDateTime(activeSubscriptionStartedAt),
@@ -157,7 +154,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Мария Сидорова',
       phone: '+79990000005',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 90000,
       debt_cents: 0,
       subscription_started_at: toSqlDateTime(activeSubscriptionStartedAt),
@@ -176,7 +172,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Алексей Воронов',
       phone: '+79990000006',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 80000,
       debt_cents: 43800,
       subscription_started_at: null,
@@ -195,7 +190,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Елена Котова',
       phone: '+79990000007',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 70000,
       debt_cents: 0,
       subscription_started_at: toSqlDateTime(expiredSubscriptionStartedAt),
@@ -214,7 +208,6 @@ export async function seed(knex: Knex): Promise<void> {
       full_name: 'Елена Котова',
       phone: '+79990000007',
       avatar_url: null,
-      firebase_token: null,
       order_limit_cents: 70000,
       debt_cents: 0,
       subscription_started_at: null,

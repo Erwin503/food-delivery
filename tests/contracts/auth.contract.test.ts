@@ -201,19 +201,27 @@ serialTest('POST /api/auth/login/step1 rejects unverified user', async () => {
   }
 });
 
-serialTest('POST /api/auth/login/step2 returns JWT for a verified user with a valid code', async () => {
+serialTest('POST /api/auth/login/step2 creates a session with the supplied Firebase token', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const response = await fetch(`${baseUrl}/api/auth/login/step2`, {
+    const response = await fetch(baseUrl + '/api/auth/login/step2', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234' }),
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        code: '1234',
+        firebaseToken: 'step2-firebase-token',
+      }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.user.email, 'employee.ivanov@cook.local');
+
+    const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
+    assert.ok(session);
+    assert.equal(session.firebase_token, 'step2-firebase-token');
   } finally {
     await stopTestServer(server);
   }
@@ -237,6 +245,28 @@ serialTest('POST /api/auth/login/step2 rejects unverified user even with a valid
   }
 });
 
+serialTest('POST /api/auth/login/password creates a session with the supplied Firebase token', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(baseUrl + '/api/auth/login/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        password: 'Password123!',
+        firebaseToken: 'password-firebase-token',
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
+    assert.ok(session);
+    assert.equal(session.firebase_token, 'password-firebase-token');
+  } finally {
+    await stopTestServer(server);
+  }
+});
 serialTest('POST /api/auth/login/password rejects unverified user', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -295,21 +325,65 @@ serialTest('PUT /api/auth/profile updates profile and uploads avatar for current
   }
 });
 
-serialTest('PUT /api/auth/push-token saves Firebase token for current user', async () => {
+serialTest('PUT /api/auth/push-token updates only the current session', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const token = generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
-    const response = await fetch(`${baseUrl}/api/auth/push-token`, {
+    const loginResponse = await fetch(baseUrl + '/api/auth/login/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        password: 'Password123!',
+        firebaseToken: 'initial-firebase-token',
+      }),
+    });
+    const loginPayload = await loginResponse.json();
+
+    const response = await fetch(baseUrl + '/api/auth/push-token', {
       method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ firebaseToken: 'firebase-device-token-123' }),
+      headers: { Authorization: 'Bearer ' + loginPayload.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firebaseToken: 'updated-firebase-token' }),
     });
 
     assert.equal(response.status, 200);
 
-    const user = await db('users').where({ id: 4 }).first();
-    assert.equal(user.firebase_token, 'firebase-device-token-123');
+    const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
+    assert.equal(session.firebase_token, 'updated-firebase-token');
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('POST /api/auth/logout deletes session and invalidates its JWT', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const loginResponse = await fetch(baseUrl + '/api/auth/login/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        password: 'Password123!',
+        firebaseToken: 'logout-firebase-token',
+      }),
+    });
+    const loginPayload = await loginResponse.json();
+    assert.equal(loginResponse.status, 200);
+
+    const logoutResponse = await fetch(baseUrl + '/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + loginPayload.token },
+    });
+    assert.equal(logoutResponse.status, 204);
+
+    const session = await db('auth_sessions').where({ user_id: 4 }).first();
+    assert.equal(session, undefined);
+
+    const profileResponse = await fetch(baseUrl + '/api/auth/profile', {
+      headers: { Authorization: 'Bearer ' + loginPayload.token },
+    });
+    assert.equal(profileResponse.status, 403);
   } finally {
     await stopTestServer(server);
   }

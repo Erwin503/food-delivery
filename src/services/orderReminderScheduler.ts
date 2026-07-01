@@ -15,15 +15,16 @@ export const sendDailyOrderReminder = async (): Promise<void> => {
     return;
   }
 
-  const users = await db('users')
-    .select('id', 'firebase_token')
-    .whereIn('role', ['employee', 'manager'])
-    .whereNotNull('email_verified_at')
-    .whereNull('deleted_at')
-    .whereNotNull('firebase_token');
+  const sessions = await db('auth_sessions as sessions')
+    .distinct('sessions.firebase_token')
+    .join('users as users', 'users.id', 'sessions.user_id')
+    .whereIn('users.role', ['employee', 'manager'])
+    .whereNotNull('users.email_verified_at')
+    .whereNull('users.deleted_at')
+    .whereNotNull('sessions.firebase_token');
 
-  const tokens = users
-    .map((user) => String(user.firebase_token || '').trim())
+  const tokens = sessions
+    .map((session) => String(session.firebase_token || '').trim())
     .filter(Boolean);
 
   if (!tokens.length) {
