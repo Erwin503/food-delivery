@@ -20,6 +20,24 @@ import { toUserDto } from '../utils/userMapper';
 const COMPANY_JOIN_CODE_TTL_SECONDS = 900;
 const DEFAULT_COMPANIES_PAGE_SIZE = 20;
 const MAX_COMPANIES_PAGE_SIZE = 100;
+const COMPANY_JOIN_CODE_MAX_GENERATION_ATTEMPTS = 10;
+
+const createUniqueCompanyJoinCode = async (): Promise<string> => {
+  for (let attempt = 0; attempt < COMPANY_JOIN_CODE_MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    const code = generateLoginCode();
+    const existingCode = await db<CompanyJoinCodeModel>('company_join_codes')
+      .where({ code })
+      .whereNull('consumed_at')
+      .where('expires_at', '>', new Date())
+      .first();
+
+    if (!existingCode) {
+      return code;
+    }
+  }
+
+  throw new AppError('Unable to generate unique company join code', 500);
+};
 
 const companyColumns = [
   'id',
@@ -173,6 +191,64 @@ const requireCompanyMember = async (companyId: number, userId: number): Promise<
   }
 
   return user;
+};
+const assignCompanyManagerByUserId = async (companyId: number, userId: number, now = new Date()): Promise<UserModel> => {
+  const currentManager = await db<CompanyManagerModel>('company_managers').where({ company_id: companyId }).first();
+  const userManagerMapping = await db<CompanyManagerModel>('company_managers').where({ user_id: userId }).first();
+
+  await db.transaction(async (trx) => {
+    if (currentManager && currentManager.user_id !== userId) {
+      await trx('users').where({ id: currentManager.user_id }).update({
+        role: 'employee',
+        updated_at: now,
+      });
+
+      await trx('company_managers').where({ company_id: companyId }).delete();
+    }
+
+    if (userManagerMapping && userManagerMapping.company_id !== companyId) {
+      await trx('company_managers').where({ user_id: userId }).delete();
+    }
+
+    await trx('users').where({ id: userId }).update({
+      company_id: companyId,
+      role: 'manager',
+      updated_at: now,
+    });
+
+    await trx('company_managers').where({ company_id: companyId }).delete();
+    await trx('company_managers').insert({
+      company_id: companyId,
+      user_id: userId,
+      created_at: now,
+    });
+  });
+
+  const manager = await loadCompanyManager(companyId);
+
+  if (!manager) {
+    throw new AppError('Manager not found', 404);
+  }
+
+  return manager;
+};
+
+const requireActiveCompanyJoinCode = async (code: string): Promise<CompanyJoinCodeModel> => {
+  const joinCode = await db<CompanyJoinCodeModel>('company_join_codes')
+    .where({ code })
+    .whereNull('consumed_at')
+    .orderBy('id', 'desc')
+    .first();
+
+  if (!joinCode) {
+    throw new AppError('Invalid company join code', 401);
+  }
+
+  if (new Date(joinCode.expires_at).getTime() < Date.now()) {
+    throw new AppError('Company join code expired', 401);
+  }
+
+  return joinCode;
 };
 
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -472,44 +548,7 @@ export const setCompanyManager = async (req: AuthRequest, res: Response, next: N
       }
     }
 
-    const currentManager = await db<CompanyManagerModel>('company_managers').where({ company_id: companyId }).first();
-    const userManagerMapping = await db<CompanyManagerModel>('company_managers').where({ user_id: userId }).first();
-    const now = new Date();
-
-    await db.transaction(async (trx) => {
-      if (currentManager && currentManager.user_id !== userId) {
-        await trx('users').where({ id: currentManager.user_id }).update({
-          role: 'employee',
-          updated_at: now,
-        });
-
-        await trx('company_managers').where({ company_id: companyId }).delete();
-      }
-
-      if (userManagerMapping && userManagerMapping.company_id !== companyId) {
-        await trx('company_managers').where({ user_id: userId }).delete();
-      }
-
-      await trx('users').where({ id: userId }).update({
-        company_id: companyId,
-        role: 'manager',
-        updated_at: now,
-      });
-
-      await trx('company_managers').where({ company_id: companyId }).delete();
-      await trx('company_managers').insert({
-        company_id: companyId,
-        user_id: userId,
-        created_at: now,
-      });
-    });
-
-    const manager = await loadCompanyManager(companyId);
-
-    if (!manager) {
-      throw new AppError('Manager not found', 404);
-    }
-
+    const manager = await assignCompanyManagerByUserId(companyId, userId);
     res.json(toUserDto(manager));
   } catch (error) {
     next(error);
@@ -524,11 +563,7 @@ export const createCompanyJoinCode = async (req: AuthRequest, res: Response, nex
       throw new AppError('Only employee users can create a personal company join code', 403);
     }
 
-    if (currentUser.company_id) {
-      throw new AppError('User already belongs to a company', 409);
-    }
-
-    const code = generateLoginCode();
+    const code = await createUniqueCompanyJoinCode();
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + COMPANY_JOIN_CODE_TTL_SECONDS * 1000);
 
@@ -605,19 +640,7 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
       throw new AppError('companyId is required for admin company join confirmation', 400);
     }
 
-    const joinCode = await db<CompanyJoinCodeModel>('company_join_codes')
-      .where({ code })
-      .whereNull('consumed_at')
-      .orderBy('id', 'desc')
-      .first();
-
-    if (!joinCode) {
-      throw new AppError('Invalid company join code', 401);
-    }
-
-    if (new Date(joinCode.expires_at).getTime() < Date.now()) {
-      throw new AppError('Company join code expired', 401);
-    }
+    const joinCode = await requireActiveCompanyJoinCode(code);
 
     const targetUser = await requireUserById(joinCode.created_by_user_id);
 
@@ -653,6 +676,38 @@ export const joinCompanyByCode = async (req: AuthRequest, res: Response, next: N
 
     const updatedUser = await requireUserById(targetUser.id);
     res.json(toUserDto(updatedUser));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setCompanyManagerByCode = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const companyId = parseRequiredId(req.params.id, 'Company id');
+    const code = String(req.body.code || '').trim();
+
+    if (!code) {
+      throw new AppError('Code is required', 400);
+    }
+
+    await requireCompany(companyId);
+    const joinCode = await requireActiveCompanyJoinCode(code);
+    const targetUser = await requireUserById(joinCode.created_by_user_id);
+
+    if (targetUser.role === 'admin') {
+      throw new AppError('Admin cannot be assigned as company manager', 409);
+    }
+
+    const now = new Date();
+    const manager = await assignCompanyManagerByUserId(companyId, targetUser.id, now);
+
+    await db('company_join_codes').where({ id: joinCode.id }).update({
+      company_id: companyId,
+      consumed_by_user_id: req.user?.id ?? null,
+      consumed_at: now,
+    });
+
+    res.json(toUserDto(manager));
   } catch (error) {
     next(error);
   }

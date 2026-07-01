@@ -399,6 +399,60 @@ serialTest('PUT /api/companies/:id/manager lets current manager transfer role to
   }
 });
 
+serialTest('POST /api/companies/:id/manager/by-code assigns manager by personal code and replaces current manager', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const codeResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+    const codePayload = await codeResponse.json();
+
+    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/1/manager/by-code`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code: codePayload.code }),
+    });
+
+    const response = await fetch(`${baseUrl}/api/companies/1/manager/by-code`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code: codePayload.code }),
+    });
+
+    assert.equal(codeResponse.status, 201);
+    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(response.status, 200);
+
+    const payload = await response.json();
+    assert.equal(payload.id, 4);
+    assert.equal(payload.role, 'manager');
+    assert.equal(payload.companyId, 1);
+
+    const previousManager = await db('users').where({ id: 2 }).first();
+    const nextManager = await db('users').where({ id: 4 }).first();
+    const managerRow = await db('company_managers').where({ company_id: 1 }).first();
+    const code = await db('company_join_codes').where({ code: codePayload.code }).first();
+
+    assert.equal(previousManager.role, 'employee');
+    assert.equal(nextManager.role, 'manager');
+    assert.equal(nextManager.company_id, 1);
+    assert.equal(managerRow.user_id, 4);
+    assert.equal(code.company_id, 1);
+    assert.equal(code.consumed_by_user_id, 1);
+    assert.ok(code.consumed_at);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 serialTest('POST /api/companies/:id/users/:userId/subscription purchases or extends personal subscription for one month', async () => {
   const { server, baseUrl } = await startTestServer();
 

@@ -14,6 +14,7 @@ import {
   removeCompanyUser,
   setCompanyUserLimit,
   setCompanyManager,
+  setCompanyManagerByCode,
   updateCompany,
 } from '../controllers/companies.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
@@ -149,6 +150,13 @@ const router = Router();
  *       properties:
  *         userId:
  *           type: integer
+ *     AssignManagerByCodeRequest:
+ *       type: object
+ *       required:
+ *         - code
+ *       properties:
+ *         code:
+ *           type: string
  *     UpdateUserLimitRequest:
  *       type: object
  *       required:
@@ -522,6 +530,39 @@ router.delete('/companies/:id/users/:userId', authenticateToken, checkRole(['adm
  *             schema:
  *               $ref: '#/components/schemas/User'
  */
+/**
+ * @swagger
+ * /companies/{id}/manager/by-code:
+ *   post:
+ *     summary: Assign company manager by personal user code
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AssignManagerByCodeRequest'
+ *     responses:
+ *       200:
+ *         description: Assigned manager
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Invalid or expired code
+ *       403:
+ *         description: Forbidden
+ */
+router.post('/companies/:id/manager/by-code', authenticateToken, checkRole(['admin']), setCompanyManagerByCode);
 router.get('/companies/:id/manager', authenticateToken, checkRole(['admin', 'manager']), getCompanyManager);
 router.put('/companies/:id/manager', authenticateToken, checkRole(['admin', 'manager']), setCompanyManager);
 
@@ -558,13 +599,13 @@ router.post('/companies/:id/users/:userId/subscription', authenticateToken, chec
  * @swagger
  * /companies/join-code:
  *   post:
- *     summary: Create a personal employee code for joining a company
+ *     summary: Create a personal employee code for company join or manager assignment
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       201:
- *         description: Join code generated
+ *         description: Personal code generated
  *         content:
  *           application/json:
  *             schema:
