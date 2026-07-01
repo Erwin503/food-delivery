@@ -25,6 +25,33 @@ const LOGIN_CODE_TTL_SECONDS = 300;
 const PASSWORD_RESET_TTL_SECONDS = 900;
 const EMAIL_VERIFICATION_TTL_SECONDS = 900;
 
+
+const normalizeDeviceId = (value: unknown, required = false): string | null => {
+  if (value === null || value === undefined) {
+    if (required) {
+      throw new AppError('deviceId is required', 400);
+    }
+
+    return null;
+  }
+
+  const deviceId = String(value).trim();
+
+  if (!deviceId) {
+    if (required) {
+      throw new AppError('deviceId is required', 400);
+    }
+
+    return null;
+  }
+
+  if (deviceId.length > 128) {
+    throw new AppError('deviceId is too long', 400);
+  }
+
+  return deviceId;
+};
+
 const normalizeFirebaseToken = (value: unknown): string | null => {
   if (value === null || value === undefined) {
     return null;
@@ -42,16 +69,36 @@ const normalizeFirebaseToken = (value: unknown): string | null => {
 const issueAuthResponse = async (
   res: Response,
   user: UserModel,
-  firebaseTokenRaw?: unknown
+  firebaseTokenRaw?: unknown,
+  deviceIdRaw?: unknown,
+  requireDeviceId = false
 ): Promise<void> => {
   const now = new Date();
   const firebaseToken = normalizeFirebaseToken(firebaseTokenRaw);
-  const [sessionId] = await db('auth_sessions').insert({
-    user_id: user.id,
-    firebase_token: firebaseToken,
-    created_at: now,
-    updated_at: now,
-  });
+  const deviceId = normalizeDeviceId(deviceIdRaw, requireDeviceId);
+
+  const trx = await db.transaction();
+  let sessionId: number;
+
+  try {
+    if (deviceId) {
+      await trx('auth_sessions').where({ device_id: deviceId }).del();
+    }
+
+    const inserted = await trx('auth_sessions').insert({
+      user_id: user.id,
+      device_id: deviceId,
+      firebase_token: firebaseToken,
+      created_at: now,
+      updated_at: now,
+    });
+
+    sessionId = Number(Array.isArray(inserted) ? inserted[0] : inserted);
+    await trx.commit();
+  } catch (error) {
+    await trx.rollback();
+    throw error;
+  }
 
   const token = generateToken({
     id: user.id,
@@ -186,7 +233,7 @@ export const confirmSignup = async (req: Request, res: Response, next: NextFunct
       throw new AppError('User not found', 404);
     }
 
-    await issueAuthResponse(res, user);
+    await issueAuthResponse(res, user, req.body.firebaseToken, req.body.deviceId, true);
   } catch (error) {
     next(error);
   }
@@ -278,7 +325,7 @@ export const loginStep2 = async (req: Request, res: Response, next: NextFunction
       consumed_at: verifiedAt,
     });
 
-    await issueAuthResponse(res, user, req.body.firebaseToken);
+    await issueAuthResponse(res, user, req.body.firebaseToken, req.body.deviceId, true);
   } catch (error) {
     next(error);
   }
@@ -303,7 +350,7 @@ export const passwordLogin = async (req: Request, res: Response, next: NextFunct
       throw new AppError('Email is not verified', 403);
     }
 
-    await issueAuthResponse(res, user, req.body.firebaseToken);
+    await issueAuthResponse(res, user, req.body.firebaseToken, req.body.deviceId, true);
   } catch (error) {
     next(error);
   }
@@ -355,12 +402,28 @@ export const updatePushToken = async (req: AuthRequest, res: Response, next: Nex
       throw new AppError('Session-bound token is required', 401);
     }
 
-    const updated = await db('auth_sessions')
-      .where({ id: sessionId, user_id: user.id })
-      .update({
-        firebase_token: normalizeFirebaseToken(req.body.firebaseToken),
-        updated_at: new Date(),
-      });
+    const firebaseToken = normalizeFirebaseToken(req.body.firebaseToken);
+    const deviceId = normalizeDeviceId(req.body.deviceId);
+    const trx = await db.transaction();
+    let updated: number;
+
+    try {
+      if (deviceId) {
+        await trx('auth_sessions').where({ device_id: deviceId }).whereNot({ id: sessionId }).del();
+      }
+
+      updated = await trx('auth_sessions')
+        .where({ id: sessionId, user_id: user.id })
+        .update({
+          firebase_token: firebaseToken,
+          ...(deviceId !== null ? { device_id: deviceId } : {}),
+          updated_at: new Date(),
+        });
+      await trx.commit();
+    } catch (error) {
+      await trx.rollback();
+      throw error;
+    }
 
     if (!updated) {
       throw new AppError('Session not found', 401);
@@ -517,7 +580,7 @@ export const confirmPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('User not found', 404);
     }
 
-    await issueAuthResponse(res, updatedUser);
+    await issueAuthResponse(res, updatedUser, req.body.firebaseToken, req.body.deviceId);
   } catch (error) {
     next(error);
   }

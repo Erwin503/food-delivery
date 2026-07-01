@@ -131,6 +131,8 @@ serialTest('POST /api/auth/signup/confirm verifies the code created during passw
       body: JSON.stringify({
         email: 'new.signup.confirm@cook.local',
         code: String(verificationCode.code),
+        firebaseToken: 'signup-firebase-token',
+        deviceId: 'signup-device',
       }),
     });
 
@@ -141,6 +143,10 @@ serialTest('POST /api/auth/signup/confirm verifies the code created during passw
     const user = await db('users').where({ email: 'new.signup.confirm@cook.local' }).first();
     assert.ok(user.email_verified_at);
     assert.equal(user.full_name, 'Confirm User');
+
+    const session = await db('auth_sessions').where({ user_id: user.id }).orderBy('id', 'desc').first();
+    assert.equal(session.firebase_token, 'signup-firebase-token');
+    assert.equal(session.device_id, 'signup-device');
   } finally {
     await stopTestServer(server);
   }
@@ -212,6 +218,7 @@ serialTest('POST /api/auth/login/step2 creates a session with the supplied Fireb
         email: 'employee.ivanov@cook.local',
         code: '1234',
         firebaseToken: 'step2-firebase-token',
+        deviceId: 'step2-device',
       }),
     });
 
@@ -222,6 +229,7 @@ serialTest('POST /api/auth/login/step2 creates a session with the supplied Fireb
     const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
     assert.ok(session);
     assert.equal(session.firebase_token, 'step2-firebase-token');
+    assert.equal(session.device_id, 'step2-device');
   } finally {
     await stopTestServer(server);
   }
@@ -236,7 +244,7 @@ serialTest('POST /api/auth/login/step2 rejects unverified user even with a valid
     const response = await fetch(`${baseUrl}/api/auth/login/step2`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234' }),
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1234', deviceId: 'unverified-step2-device' }),
     });
 
     assert.equal(response.status, 403);
@@ -256,6 +264,7 @@ serialTest('POST /api/auth/login/password creates a session with the supplied Fi
         email: 'employee.ivanov@cook.local',
         password: 'Password123!',
         firebaseToken: 'password-firebase-token',
+        deviceId: 'password-device',
       }),
     });
 
@@ -263,6 +272,46 @@ serialTest('POST /api/auth/login/password creates a session with the supplied Fi
     const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
     assert.ok(session);
     assert.equal(session.firebase_token, 'password-firebase-token');
+    assert.equal(session.device_id, 'password-device');
+  } finally {
+    await stopTestServer(server);
+  }
+});
+serialTest('POST /api/auth/login/password replaces an existing session for the same deviceId', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const firstResponse = await fetch(baseUrl + '/api/auth/login/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        password: 'Password123!',
+        firebaseToken: 'first-device-token',
+        deviceId: 'shared-device',
+      }),
+    });
+    assert.equal(firstResponse.status, 200);
+
+    const firstSession = await db('auth_sessions').where({ user_id: 4, device_id: 'shared-device' }).first();
+    assert.ok(firstSession);
+
+    const secondResponse = await fetch(baseUrl + '/api/auth/login/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'employee.ivanov@cook.local',
+        password: 'Password123!',
+        firebaseToken: 'second-device-token',
+        deviceId: 'shared-device',
+      }),
+    });
+    assert.equal(secondResponse.status, 200);
+
+    const sessions = await db('auth_sessions').where({ user_id: 4, device_id: 'shared-device' });
+    assert.equal(sessions.length, 1);
+    assert.notEqual(sessions[0].id, firstSession.id);
+    assert.equal(sessions[0].firebase_token, 'second-device-token');
   } finally {
     await stopTestServer(server);
   }
@@ -276,7 +325,7 @@ serialTest('POST /api/auth/login/password rejects unverified user', async () => 
     const response = await fetch(`${baseUrl}/api/auth/login/password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', password: 'Password123!' }),
+      body: JSON.stringify({ email: 'employee.ivanov@cook.local', password: 'Password123!', deviceId: 'unverified-device' }),
     });
 
     assert.equal(response.status, 403);
@@ -336,6 +385,7 @@ serialTest('PUT /api/auth/push-token updates only the current session', async ()
         email: 'employee.ivanov@cook.local',
         password: 'Password123!',
         firebaseToken: 'initial-firebase-token',
+        deviceId: 'push-token-device',
       }),
     });
     const loginPayload = await loginResponse.json();
@@ -343,13 +393,14 @@ serialTest('PUT /api/auth/push-token updates only the current session', async ()
     const response = await fetch(baseUrl + '/api/auth/push-token', {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + loginPayload.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ firebaseToken: 'updated-firebase-token' }),
+      body: JSON.stringify({ firebaseToken: 'updated-firebase-token', deviceId: 'push-token-device' }),
     });
 
     assert.equal(response.status, 200);
 
     const session = await db('auth_sessions').where({ user_id: 4 }).orderBy('id', 'desc').first();
     assert.equal(session.firebase_token, 'updated-firebase-token');
+    assert.equal(session.device_id, 'push-token-device');
   } finally {
     await stopTestServer(server);
   }
@@ -366,6 +417,7 @@ serialTest('POST /api/auth/logout deletes session and invalidates its JWT', asyn
         email: 'employee.ivanov@cook.local',
         password: 'Password123!',
         firebaseToken: 'logout-firebase-token',
+        deviceId: 'logout-device',
       }),
     });
     const loginPayload = await loginResponse.json();

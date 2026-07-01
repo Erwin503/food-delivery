@@ -9,26 +9,39 @@ const REMINDER_TIMEZONE = process.env.ORDER_REMINDER_TIMEZONE?.trim() || 'Europe
 export const REMINDER_TITLE = '\u041d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435 \u043e \u0437\u0430\u043a\u0430\u0437\u0435';
 export const REMINDER_BODY = '\u0421\u043a\u043e\u0440\u043e \u0431\u0443\u0434\u0435\u0442 \u0441\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d \u0437\u0430\u043a\u0430\u0437. \u0415\u0441\u043b\u0438 \u0445\u043e\u0442\u0438\u0442\u0435 \u0447\u0442\u043e-\u0442\u043e \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c, \u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043a\u043e\u0440\u0437\u0438\u043d\u0443 \u0437\u0430\u0440\u0430\u043d\u0435\u0435.';
 
+type OrderReminderRecipient = {
+  user_id: number;
+  device_id: string;
+  firebase_token: string;
+};
+
+export const loadDailyOrderReminderRecipients = async (): Promise<OrderReminderRecipient[]> =>
+  db<OrderReminderRecipient>('auth_sessions as sessions')
+    .distinct(
+      'sessions.user_id',
+      'sessions.device_id',
+      'sessions.firebase_token'
+    )
+    .join('users as users', 'users.id', 'sessions.user_id')
+    .whereIn('users.role', ['employee', 'manager'])
+    .whereNotNull('users.email_verified_at')
+    .whereNull('users.deleted_at')
+    .whereNotNull('sessions.device_id')
+    .whereNotNull('sessions.firebase_token');
+
 export const sendDailyOrderReminder = async (): Promise<void> => {
   if (!isFirebaseConfigured()) {
     logger.warn('Order reminder skipped because Firebase is not configured.');
     return;
   }
 
-  const sessions = await db('auth_sessions as sessions')
-    .distinct('sessions.firebase_token')
-    .join('users as users', 'users.id', 'sessions.user_id')
-    .whereIn('users.role', ['employee', 'manager'])
-    .whereNotNull('users.email_verified_at')
-    .whereNull('users.deleted_at')
-    .whereNotNull('sessions.firebase_token');
-
-  const tokens = sessions
-    .map((session) => String(session.firebase_token || '').trim())
+  const recipients = await loadDailyOrderReminderRecipients();
+  const tokens = recipients
+    .map((recipient) => String(recipient.firebase_token || '').trim())
     .filter(Boolean);
 
   if (!tokens.length) {
-    logger.info('Order reminder skipped because no Firebase tokens are registered.');
+    logger.info('Order reminder skipped because no Firebase device tokens are registered.');
     return;
   }
 
@@ -38,6 +51,8 @@ export const sendDailyOrderReminder = async (): Promise<void> => {
 
   logger.info('Daily Firebase order reminder sent', {
     recipients: tokens.length,
+    devices: recipients.length,
+    users: new Set(recipients.map((recipient) => recipient.user_id)).size,
   });
 };
 

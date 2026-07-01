@@ -130,6 +130,7 @@ const router = Router();
  *       required:
  *         - email
  *         - code
+ *         - deviceId
  *       properties:
  *         email:
  *           type: string
@@ -141,11 +142,16 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           description: Optional FCM token for the newly created session.
+ *         deviceId:
+ *           type: string
+ *           description: Stable client device identifier for this auth session and push notifications.
+ *           example: mobile-device-001
  *     PasswordLoginRequest:
  *       type: object
  *       required:
  *         - email
  *         - password
+ *         - deviceId
  *       properties:
  *         email:
  *           type: string
@@ -158,6 +164,10 @@ const router = Router();
  *           type: string
  *           nullable: true
  *           description: Optional FCM token for the newly created session.
+ *         deviceId:
+ *           type: string
+ *           description: Stable client device identifier for this auth session and push notifications.
+ *           example: mobile-device-001
  *     UpdateProfileRequest:
  *       type: object
  *       properties:
@@ -289,6 +299,7 @@ const router = Router();
  *       required:
  *         - email
  *         - code
+ *         - deviceId
  *       properties:
  *         email:
  *           type: string
@@ -296,6 +307,14 @@ const router = Router();
  *         code:
  *           type: string
  *           example: "6543"
+ *         firebaseToken:
+ *           type: string
+ *           nullable: true
+ *           description: Optional FCM token for the newly created session.
+ *         deviceId:
+ *           type: string
+ *           description: Stable client device identifier for this auth session and push notifications.
+ *           example: mobile-device-001
  */
 
 /**
