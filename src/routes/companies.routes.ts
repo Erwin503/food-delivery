@@ -124,6 +124,10 @@ const router = Router();
  *         address:
  *           type: string
  *           nullable: true
+ *         managerCode:
+ *           type: string
+ *           nullable: true
+ *           description: Optional personal code of a user to assign as this company manager on creation.
  *     UpdateCompanyRequest:
  *       type: object
  *       properties:

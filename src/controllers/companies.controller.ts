@@ -251,6 +251,22 @@ const requireActiveCompanyJoinCode = async (code: string): Promise<CompanyJoinCo
   return joinCode;
 };
 
+type ManagerCodeAssignment = {
+  joinCode: CompanyJoinCodeModel;
+  targetUser: UserModel;
+};
+
+const requireManagerCodeAssignment = async (code: string): Promise<ManagerCodeAssignment> => {
+  const joinCode = await requireActiveCompanyJoinCode(code);
+  const targetUser = await requireUserById(joinCode.created_by_user_id);
+
+  if (targetUser.role === 'admin') {
+    throw new AppError('Admin cannot be assigned as company manager', 409);
+  }
+
+  return { joinCode, targetUser };
+};
+
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const page = parsePositiveIntegerQuery(req.query.page, 'page', 1);
@@ -321,10 +337,13 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
     const name = String(req.body.name || '').trim();
     const description = req.body.description ?? null;
     const address = req.body.address ?? null;
+    const managerCode = String(req.body.managerCode || '').trim();
 
     if (!name) {
       throw new AppError('Company name is required', 400);
     }
+
+    const managerAssignment = managerCode ? await requireManagerCodeAssignment(managerCode) : null;
 
     const now = new Date();
     const inserted = await db('companies').insert({
@@ -340,6 +359,16 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
     });
 
     const companyId = Array.isArray(inserted) ? Number(inserted[0]) : Number(inserted);
+
+    if (managerAssignment) {
+      await assignCompanyManagerByUserId(companyId, managerAssignment.targetUser.id, now);
+      await db('company_join_codes').where({ id: managerAssignment.joinCode.id }).update({
+        company_id: companyId,
+        consumed_by_user_id: req.user?.id ?? null,
+        consumed_at: now,
+      });
+    }
+
     const company = await requireCompany(companyId);
     res.status(201).json(toCompanyDto(company));
   } catch (error) {
@@ -691,17 +720,11 @@ export const setCompanyManagerByCode = async (req: AuthRequest, res: Response, n
     }
 
     await requireCompany(companyId);
-    const joinCode = await requireActiveCompanyJoinCode(code);
-    const targetUser = await requireUserById(joinCode.created_by_user_id);
-
-    if (targetUser.role === 'admin') {
-      throw new AppError('Admin cannot be assigned as company manager', 409);
-    }
-
+    const managerAssignment = await requireManagerCodeAssignment(code);
     const now = new Date();
-    const manager = await assignCompanyManagerByUserId(companyId, targetUser.id, now);
+    const manager = await assignCompanyManagerByUserId(companyId, managerAssignment.targetUser.id, now);
 
-    await db('company_join_codes').where({ id: joinCode.id }).update({
+    await db('company_join_codes').where({ id: managerAssignment.joinCode.id }).update({
       company_id: companyId,
       consumed_by_user_id: req.user?.id ?? null,
       consumed_at: now,

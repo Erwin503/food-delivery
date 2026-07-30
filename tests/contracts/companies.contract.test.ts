@@ -120,6 +120,53 @@ serialTest('POST /api/companies creates a company for admin role', async () => {
   }
 });
 
+
+serialTest('POST /api/companies creates a company and assigns manager by code when managerCode is provided', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const codeResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+    const codePayload = await codeResponse.json();
+
+    const response = await fetch(`${baseUrl}/api/companies`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'ООО Быстрый старт',
+        description: 'Компания сразу с менеджером',
+        address: 'Москва, Тестовая, 5',
+        managerCode: codePayload.code,
+      }),
+    });
+
+    assert.equal(codeResponse.status, 201);
+    assert.equal(response.status, 201);
+
+    const payload = await response.json();
+    assert.equal(payload.name, 'ООО Быстрый старт');
+
+    const company = await db('companies').where({ id: payload.id }).first();
+    const managerRow = await db('company_managers').where({ company_id: payload.id }).first();
+    const manager = await db('users').where({ id: 4 }).first();
+    const code = await db('company_join_codes').where({ code: codePayload.code }).first();
+
+    assert.ok(company);
+    assert.equal(managerRow.user_id, 4);
+    assert.equal(manager.role, 'manager');
+    assert.equal(manager.company_id, payload.id);
+    assert.equal(code.company_id, payload.id);
+    assert.equal(code.consumed_by_user_id, 1);
+    assert.ok(code.consumed_at);
+  } finally {
+    await stopTestServer(server);
+  }
+});
 serialTest('PUT /api/companies/:id updates company fields for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
