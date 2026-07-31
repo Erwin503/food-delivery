@@ -7,6 +7,7 @@ import {
   deleteCompany,
   getCompanies,
   getCompanyById,
+  getCompanyJoinCodeUser,
   getCompanyManager,
   getCompanyUsers,
   joinCompanyByCode,
@@ -139,6 +140,10 @@ const router = Router();
  *         address:
  *           type: string
  *           nullable: true
+ *         managerId:
+ *           type: integer
+ *           nullable: true
+ *           description: Optional user id to assign as this company manager.
  *     AssignCompanyUserRequest:
  *       type: object
  *       properties:
@@ -275,6 +280,32 @@ router.post('/companies', authenticateToken, checkRole(['admin']), createCompany
  *         description: Invalid or expired code
  */
 router.post('/companies/join', authenticateToken, checkRole(['manager', 'admin']), joinCompanyByCode);
+
+/**
+ * @swagger
+ * /companies/join-code/{code}/user:
+ *   get:
+ *     summary: Get user information by personal company code
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User information for active code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Invalid or expired code
+ */
+router.get('/companies/join-code/:code/user', authenticateToken, checkRole(['admin', 'manager']), getCompanyJoinCodeUser);
 
 /**
  * @swagger

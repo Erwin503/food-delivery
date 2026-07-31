@@ -267,6 +267,24 @@ const requireManagerCodeAssignment = async (code: string): Promise<ManagerCodeAs
   return { joinCode, targetUser };
 };
 
+const assignCompanyManagerByCode = async (
+  companyId: number,
+  code: string,
+  consumedByUserId: number | null,
+  now = new Date()
+): Promise<UserModel> => {
+  const managerAssignment = await requireManagerCodeAssignment(code);
+  const manager = await assignCompanyManagerByUserId(companyId, managerAssignment.targetUser.id, now);
+
+  await db('company_join_codes').where({ id: managerAssignment.joinCode.id }).update({
+    company_id: companyId,
+    consumed_by_user_id: consumedByUserId,
+    consumed_at: now,
+  });
+
+  return manager;
+};
+
 export const getCompanies = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const page = parsePositiveIntegerQuery(req.query.page, 'page', 1);
@@ -344,7 +362,6 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
     }
 
     const managerAssignment = managerCode ? await requireManagerCodeAssignment(managerCode) : null;
-
     const now = new Date();
     const inserted = await db('companies').insert({
       name,
@@ -382,8 +399,34 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
 
     await requireManagerOrAdminForCompany(req, companyId);
 
+    const now = new Date();
+    const managerId = 'managerId' in req.body ? Number(req.body.managerId) : null;
+
+    if ('managerId' in req.body && (!Number.isInteger(managerId) || Number(managerId) < 1)) {
+      throw new AppError('managerId must be a positive integer', 400);
+    }
+
+    if (managerId) {
+      const isAdmin = req.user?.role === 'admin';
+      const nextManager = await requireUserById(managerId);
+
+      if (nextManager.role === 'admin') {
+        throw new AppError('Admin cannot be assigned as company manager', 409);
+      }
+
+      if (!isAdmin) {
+        if (nextManager.company_id !== companyId) {
+          throw new AppError('Manager can transfer role only inside the same company', 409);
+        }
+
+        if (nextManager.role !== 'employee') {
+          throw new AppError('Manager role can be transferred only to an employee', 409);
+        }
+      }
+    }
+
     const patch: Record<string, unknown> = {
-      updated_at: new Date(),
+      updated_at: now,
     };
 
     if ('name' in req.body) {
@@ -405,6 +448,10 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
     }
 
     await db('companies').where({ id: companyId }).update(patch);
+
+    if (managerId) {
+      await assignCompanyManagerByUserId(companyId, managerId, now);
+    }
 
     const company = await requireCompany(companyId);
     res.json(toCompanyDto(company));
@@ -615,6 +662,22 @@ export const createCompanyJoinCode = async (req: AuthRequest, res: Response, nex
   }
 };
 
+export const getCompanyJoinCodeUser = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const code = String(req.params.code || '').trim();
+
+    if (!code) {
+      throw new AppError('Code is required', 400);
+    }
+
+    const joinCode = await requireActiveCompanyJoinCode(code);
+    const targetUser = await requireUserById(joinCode.created_by_user_id);
+
+    res.json(toUserDto(targetUser));
+  } catch (error) {
+    next(error);
+  }
+};
 export const purchaseCompanyUserSubscription = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const companyId = parseRequiredId(req.params.id, 'Company id');
@@ -720,15 +783,7 @@ export const setCompanyManagerByCode = async (req: AuthRequest, res: Response, n
     }
 
     await requireCompany(companyId);
-    const managerAssignment = await requireManagerCodeAssignment(code);
-    const now = new Date();
-    const manager = await assignCompanyManagerByUserId(companyId, managerAssignment.targetUser.id, now);
-
-    await db('company_join_codes').where({ id: managerAssignment.joinCode.id }).update({
-      company_id: companyId,
-      consumed_by_user_id: req.user?.id ?? null,
-      consumed_at: now,
-    });
+    const manager = await assignCompanyManagerByCode(companyId, code, req.user?.id ?? null);
 
     res.json(toUserDto(manager));
   } catch (error) {
