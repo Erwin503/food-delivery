@@ -119,6 +119,39 @@ serialTest('POST /api/companies creates a company for admin role', async () => {
     await stopTestServer(server);
   }
 });
+serialTest('POST /api/companies creates a company and assigns manager by managerId when provided', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Manager by id LLC',
+        description: 'Created with managerId',
+        address: 'Test street, 7',
+        managerId: 7,
+      }),
+    });
+
+    assert.equal(response.status, 201);
+
+    const payload = await response.json();
+    assert.equal(payload.name, 'Manager by id LLC');
+
+    const managerRow = await db('company_managers').where({ company_id: payload.id }).first();
+    const manager = await db('users').where({ id: 7 }).first();
+
+    assert.equal(managerRow.user_id, 7);
+    assert.equal(manager.role, 'manager');
+    assert.equal(manager.company_id, payload.id);
+  } finally {
+    await stopTestServer(server);
+  }
+});
 
 
 serialTest('POST /api/companies creates a company and assigns manager by code when managerCode is provided', async () => {
@@ -167,6 +200,7 @@ serialTest('POST /api/companies creates a company and assigns manager by code wh
     await stopTestServer(server);
   }
 });
+
 serialTest('PUT /api/companies/:id updates company fields for admin or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 

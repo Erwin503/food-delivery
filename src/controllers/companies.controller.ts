@@ -356,12 +356,28 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
     const description = req.body.description ?? null;
     const address = req.body.address ?? null;
     const managerCode = String(req.body.managerCode || '').trim();
+    const hasManagerId = 'managerId' in req.body && req.body.managerId !== null && req.body.managerId !== '';
+    const managerId = hasManagerId ? Number(req.body.managerId) : null;
 
     if (!name) {
       throw new AppError('Company name is required', 400);
     }
 
+    if (managerCode && hasManagerId) {
+      throw new AppError('managerCode and managerId cannot be used together', 400);
+    }
+
+    if (hasManagerId && (!Number.isInteger(managerId) || Number(managerId) < 1)) {
+      throw new AppError('managerId must be a positive integer', 400);
+    }
+
     const managerAssignment = managerCode ? await requireManagerCodeAssignment(managerCode) : null;
+    const managerById = managerId ? await requireUserById(managerId) : null;
+
+    if (managerById?.role === 'admin') {
+      throw new AppError('Admin cannot be assigned as company manager', 409);
+    }
+
     const now = new Date();
     const inserted = await db('companies').insert({
       name,
@@ -384,6 +400,8 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
         consumed_by_user_id: req.user?.id ?? null,
         consumed_at: now,
       });
+    } else if (managerId) {
+      await assignCompanyManagerByUserId(companyId, managerId, now);
     }
 
     const company = await requireCompany(companyId);
@@ -400,9 +418,10 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
     await requireManagerOrAdminForCompany(req, companyId);
 
     const now = new Date();
-    const managerId = 'managerId' in req.body ? Number(req.body.managerId) : null;
+    const hasManagerId = 'managerId' in req.body && req.body.managerId !== null && req.body.managerId !== '';
+    const managerId = hasManagerId ? Number(req.body.managerId) : null;
 
-    if ('managerId' in req.body && (!Number.isInteger(managerId) || Number(managerId) < 1)) {
+    if (hasManagerId && (!Number.isInteger(managerId) || Number(managerId) < 1)) {
       throw new AppError('managerId must be a positive integer', 400);
     }
 
