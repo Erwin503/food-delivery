@@ -163,6 +163,9 @@ const router = Router();
  *       properties:
  *         userId:
  *           type: integer
+ *         managerId:
+ *           type: integer
+ *           description: Alias of userId for assigning a manager.
  *     AssignManagerByCodeRequest:
  *       type: object
  *       required:

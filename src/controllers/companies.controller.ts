@@ -613,10 +613,10 @@ export const getCompanyManager = async (req: AuthRequest, res: Response, next: N
 export const setCompanyManager = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const companyId = parseRequiredId(req.params.id, 'Company id');
-    const userId = Number(req.body.userId);
+    const userId = Number(req.body.userId ?? req.body.managerId);
 
-    if (!userId) {
-      throw new AppError('Company id and userId are required', 400);
+    if (!Number.isInteger(userId) || userId < 1) {
+      throw new AppError('Company id and userId or managerId are required', 400);
     }
 
     const isAdmin = req.user?.role === 'admin';

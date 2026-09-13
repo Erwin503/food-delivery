@@ -250,6 +250,31 @@ serialTest('PUT /api/companies/:id assigns manager by managerId', async () => {
     await stopTestServer(server);
   }
 });
+serialTest('PUT /api/companies/:id lets admin assign a free employee as manager by managerId', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies/3`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ managerId: 7 }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const managerRow = await db('company_managers').where({ company_id: 3 }).first();
+    const manager = await db('users').where({ id: 7 }).first();
+
+    assert.equal(managerRow.user_id, 7);
+    assert.equal(manager.role, 'manager');
+    assert.equal(manager.company_id, 3);
+  } finally {
+    await stopTestServer(server);
+  }
+});
 
 serialTest('DELETE /api/companies/:id removes or archives a company for admin role', async () => {
   const { server, baseUrl } = await startTestServer();
@@ -472,6 +497,36 @@ serialTest('PUT /api/companies/:id/manager assigns the company manager', async (
 
     const managerRow = await db('company_managers').where({ company_id: 3 }).first();
     assert.equal(managerRow.user_id, 7);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+serialTest('PUT /api/companies/:id/manager accepts managerId and updates user role and company', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies/3/manager`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ managerId: 7 }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const payload = await response.json();
+    assert.equal(payload.id, 7);
+    assert.equal(payload.role, 'manager');
+    assert.equal(payload.companyId, 3);
+
+    const managerRow = await db('company_managers').where({ company_id: 3 }).first();
+    const manager = await db('users').where({ id: 7 }).first();
+
+    assert.equal(managerRow.user_id, 7);
+    assert.equal(manager.role, 'manager');
+    assert.equal(manager.company_id, 3);
   } finally {
     await stopTestServer(server);
   }
