@@ -374,7 +374,7 @@ router.get('/companies/join-code/:code/user', authenticateToken, checkRole(['adm
  *       204:
  *         description: Company archived
  */
-router.get('/companies/:id', authenticateToken, checkRole(['admin', 'manager']), getCompanyById);
+router.get('/companies/:id', authenticateToken, checkRole(['admin', 'manager', 'employee']), getCompanyById);
 router.put('/companies/:id', authenticateToken, checkRole(['admin', 'manager']), updateCompany);
 router.delete('/companies/:id', authenticateToken, checkRole(['admin']), deleteCompany);
 
@@ -641,7 +641,7 @@ router.post('/companies/:id/users/:userId/subscription', authenticateToken, chec
  * @swagger
  * /companies/join-code:
  *   post:
- *     summary: Create a personal employee code for company join or manager assignment
+ *     summary: Create a personal user code for company join or manager assignment
  *     tags: [Companies]
  *     security:
  *       - bearerAuth: []
@@ -653,6 +653,6 @@ router.post('/companies/:id/users/:userId/subscription', authenticateToken, chec
  *             schema:
  *               $ref: '#/components/schemas/CompanyJoinCodeResponse'
  */
-router.post('/companies/join-code', authenticateToken, checkRole(['employee']), createCompanyJoinCode);
+router.post('/companies/join-code', authenticateToken, checkRole(['employee', 'manager']), createCompanyJoinCode);
 
 export default router;

@@ -20,6 +20,9 @@ const employeeToken = () =>
 const freeEmployeeToken = () =>
   generateToken({ id: 7, email: 'employee.sever@cook.local', role: 'employee', companyId: null });
 
+const employeeSidorovaToken = () =>
+  generateToken({ id: 5, email: 'employee.sidorova@cook.local', role: 'employee', companyId: 1 });
+
 test.beforeEach(async () => {
   await lockAndSeedDb(db);
   await db('users').where({ id: 7 }).update({ company_id: null, updated_at: '2026-03-15 09:00:00' });
@@ -82,14 +85,20 @@ serialTest('GET /api/companies/:id returns a single company by id', async () => 
     const response = await fetch(`${baseUrl}/api/companies/1`, {
       headers: { Authorization: `Bearer ${managerToken()}` },
     });
-    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/1`, {
+    const employeeOwnCompanyResponse = await fetch(`${baseUrl}/api/companies/1`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+    const employeeOtherCompanyResponse = await fetch(`${baseUrl}/api/companies/2`, {
       headers: { Authorization: `Bearer ${employeeToken()}` },
     });
 
     assert.equal(response.status, 200);
-    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(employeeOwnCompanyResponse.status, 200);
+    assert.equal(employeeOtherCompanyResponse.status, 403);
     const payload = await response.json();
+    const employeePayload = await employeeOwnCompanyResponse.json();
     assert.equal(payload.name, 'ООО Ромашка');
+    assert.equal(employeePayload.id, 1);
   } finally {
     await stopTestServer(server);
   }
@@ -246,6 +255,54 @@ serialTest('PUT /api/companies/:id assigns manager by managerId', async () => {
     assert.equal(nextManager.role, 'manager');
     assert.equal(nextManager.company_id, 1);
     assert.equal(managerRow.user_id, 5);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+serialTest('PUT /api/companies/:id assigns manager by managerCode for admin only', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const codeResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${employeeSidorovaToken()}` },
+    });
+    const codePayload = await codeResponse.json();
+
+    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/1`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ managerCode: codePayload.code }),
+    });
+
+    const response = await fetch(`${baseUrl}/api/companies/1`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${adminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ managerCode: codePayload.code }),
+    });
+
+    assert.equal(codeResponse.status, 201);
+    assert.equal(forbiddenResponse.status, 403);
+    assert.equal(response.status, 200);
+
+    const previousManager = await db('users').where({ id: 2 }).first();
+    const nextManager = await db('users').where({ id: 5 }).first();
+    const managerRow = await db('company_managers').where({ company_id: 1 }).first();
+    const code = await db('company_join_codes').where({ code: codePayload.code }).first();
+
+    assert.equal(previousManager.role, 'employee');
+    assert.equal(nextManager.role, 'manager');
+    assert.equal(nextManager.company_id, 1);
+    assert.equal(managerRow.user_id, 5);
+    assert.equal(code.company_id, 1);
+    assert.equal(code.consumed_by_user_id, 1);
+    assert.ok(code.consumed_at);
   } finally {
     await stopTestServer(server);
   }
@@ -639,7 +696,7 @@ serialTest('POST /api/companies/:id/users/:userId/subscription purchases or exte
   }
 });
 
-serialTest('POST /api/companies/join-code creates a personal short join code for a free employee', async () => {
+serialTest('POST /api/companies/join-code creates a personal short join code for employee or manager', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -647,16 +704,32 @@ serialTest('POST /api/companies/join-code creates a personal short join code for
       method: 'POST',
       headers: { Authorization: `Bearer ${freeEmployeeToken()}` },
     });
+    const managerResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${managerToken()}` },
+    });
+    const adminResponse = await fetch(`${baseUrl}/api/companies/join-code`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken()}` },
+    });
 
     assert.equal(response.status, 201);
+    assert.equal(managerResponse.status, 201);
+    assert.equal(adminResponse.status, 403);
     const payload = await response.json();
+    const managerPayload = await managerResponse.json();
     assert.equal(typeof payload.code, 'string');
     assert.equal(payload.code.length, 4);
     assert.equal(payload.expiresInSeconds, 900);
+    assert.equal(typeof managerPayload.code, 'string');
+    assert.equal(managerPayload.code.length, 4);
 
     const code = await db('company_join_codes').where({ code: payload.code }).first();
+    const managerCode = await db('company_join_codes').where({ code: managerPayload.code }).first();
     assert.equal(code.created_by_user_id, 7);
     assert.equal(code.company_id, null);
+    assert.equal(managerCode.created_by_user_id, 2);
+    assert.equal(managerCode.company_id, null);
   } finally {
     await stopTestServer(server);
   }

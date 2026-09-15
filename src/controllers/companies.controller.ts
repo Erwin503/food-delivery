@@ -129,7 +129,7 @@ const requireCurrentUser = async (req: AuthRequest): Promise<UserModel> => {
 const requireCompanyVisibility = async (req: AuthRequest, companyId: number): Promise<CompanyModel> => {
   const company = await requireCompany(companyId);
 
-  if (hasCompanyManagementAccess(req.user, companyId)) {
+  if (req.user?.role === 'admin' || req.user?.companyId === companyId) {
     return company;
   }
 
@@ -418,12 +418,23 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
     await requireManagerOrAdminForCompany(req, companyId);
 
     const now = new Date();
+    const managerCode = 'managerCode' in req.body ? String(req.body.managerCode || '').trim() : '';
     const hasManagerId = 'managerId' in req.body && req.body.managerId !== null && req.body.managerId !== '';
     const managerId = hasManagerId ? Number(req.body.managerId) : null;
+
+    if (managerCode && hasManagerId) {
+      throw new AppError('managerCode and managerId cannot be used together', 400);
+    }
+
+    if (managerCode && req.user?.role !== 'admin') {
+      throw new AppError('Only admin can assign company manager by code', 403);
+    }
 
     if (hasManagerId && (!Number.isInteger(managerId) || Number(managerId) < 1)) {
       throw new AppError('managerId must be a positive integer', 400);
     }
+
+    const managerAssignment = managerCode ? await requireManagerCodeAssignment(managerCode) : null;
 
     if (managerId) {
       const isAdmin = req.user?.role === 'admin';
@@ -468,7 +479,14 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
 
     await db('companies').where({ id: companyId }).update(patch);
 
-    if (managerId) {
+    if (managerAssignment) {
+      await assignCompanyManagerByUserId(companyId, managerAssignment.targetUser.id, now);
+      await db('company_join_codes').where({ id: managerAssignment.joinCode.id }).update({
+        company_id: companyId,
+        consumed_by_user_id: req.user?.id ?? null,
+        consumed_at: now,
+      });
+    } else if (managerId) {
       await assignCompanyManagerByUserId(companyId, managerId, now);
     }
 
@@ -654,8 +672,8 @@ export const createCompanyJoinCode = async (req: AuthRequest, res: Response, nex
   try {
     const currentUser = await requireCurrentUser(req);
 
-    if (currentUser.role !== 'employee') {
-      throw new AppError('Only employee users can create a personal company join code', 403);
+    if (currentUser.role === 'admin') {
+      throw new AppError('Admin cannot create a personal company join code', 403);
     }
 
     const code = await createUniqueCompanyJoinCode();
