@@ -31,6 +31,17 @@ export const authenticateToken = async (
   try {
     const user = jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
 
+    const currentUser = await db('users')
+      .select('id', 'email', 'role', 'company_id', 'deleted_at')
+      .where({ id: user.id })
+      .whereNull('deleted_at')
+      .first();
+
+    if (!currentUser) {
+      res.status(401).json({ message: 'User not found or inactive' });
+      return;
+    }
+
     if (user.sessionId) {
       const session = await db('auth_sessions')
         .select('id')
@@ -43,7 +54,13 @@ export const authenticateToken = async (
       }
     }
 
-    req.user = user;
+    req.user = {
+      ...user,
+      id: currentUser.id,
+      email: currentUser.email,
+      role: currentUser.role,
+      companyId: currentUser.company_id,
+    };
     next();
   } catch (error) {
     logger.error(error);

@@ -845,3 +845,39 @@ serialTest('POST /api/companies/join lets admin confirm employee join to selecte
     await stopTestServer(server);
   }
 });
+
+serialTest('GET /api/companies/:id/users resolves the manager company from the current assignment', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const staleManagerToken = generateToken({
+      id: 2,
+      email: 'manager.romashka@cook.local',
+      role: 'manager',
+      companyId: null,
+    });
+    const response = await fetch(`${baseUrl}/api/companies/1/users`, {
+      headers: { Authorization: `Bearer ${staleManagerToken}` },
+    });
+
+    assert.equal(response.status, 200);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+serialTest('protected routes use the current role from the database', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const staleEmployeeToken = employeeToken();
+    await db('users').where({ id: 4 }).update({ role: 'manager', updated_at: new Date() });
+
+    const response = await fetch(`${baseUrl}/api/companies/1/users`, {
+      headers: { Authorization: `Bearer ${staleEmployeeToken}` },
+    });
+
+    assert.equal(response.status, 200);
+  } finally {
+    await stopTestServer(server);
+  }
+});

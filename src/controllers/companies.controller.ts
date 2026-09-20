@@ -139,7 +139,13 @@ const requireCompanyVisibility = async (req: AuthRequest, companyId: number): Pr
 const requireManagerOrAdminForCompany = async (req: AuthRequest, companyId: number): Promise<CompanyModel> => {
   const company = await requireCompany(companyId);
 
-  if (!hasCompanyManagementAccess(req.user, companyId)) {
+  const isAdmin = req.user?.role === 'admin';
+  const isManagerByToken = hasCompanyManagementAccess(req.user, companyId);
+  const isManagerByAssignment = req.user?.role === 'manager'
+    && Boolean(req.user.id)
+    && Boolean(await db('company_managers').where({ company_id: companyId, user_id: req.user.id }).first());
+
+  if (!isAdmin && !isManagerByToken && !isManagerByAssignment) {
     throw new AppError('Forbidden', 403);
   }
 
