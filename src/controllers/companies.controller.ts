@@ -539,6 +539,48 @@ export const getCompanyUsers = async (req: AuthRequest, res: Response, next: Nex
   }
 };
 
+export const updateCompanyUserProfile = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = parseRequiredId(req.params.userId, 'User id');
+    const actor = await requireCurrentUser(req);
+    const targetUser = await requireUserById(userId);
+
+    if (!targetUser.company_id) {
+      throw new AppError('User does not belong to a company', 404);
+    }
+
+    const companyId = targetUser.company_id;
+    await requireManagerOrAdminForCompany(req, companyId);
+    await requireCompanyMember(companyId, userId);
+
+    if (actor.role === 'manager' && targetUser.role !== 'employee') {
+      throw new AppError('Manager can edit only employees of their company', 403);
+    }
+
+    const patch: Record<string, unknown> = {
+      updated_at: new Date(),
+    };
+
+    if ('fullName' in req.body) {
+      patch.full_name = req.body.fullName === null ? null : String(req.body.fullName).trim();
+    }
+
+    if ('phone' in req.body) {
+      patch.phone = req.body.phone === null ? null : String(req.body.phone).trim();
+    }
+
+    if (Object.keys(patch).length === 1) {
+      throw new AppError('At least one of fullName or phone is required', 400);
+    }
+
+    await db('users').where({ id: userId }).update(patch);
+
+    const updatedUser = await requireUserById(userId);
+    res.json(toUserDto(updatedUser));
+  } catch (error) {
+    next(error);
+  }
+};
 export const assignCompanyUser = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const companyId = parseRequiredId(req.params.id, 'Company id');

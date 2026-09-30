@@ -881,3 +881,36 @@ serialTest('protected routes use the current role from the database', async () =
     await stopTestServer(server);
   }
 });
+
+serialTest('PUT /api/companies/users/:userId lets a manager edit employee contact data in own company', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies/users/4`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fullName: 'Иван Обновлённый', phone: '+79990000044' }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.fullName, 'Иван Обновлённый');
+    assert.equal(payload.phone, '+79990000044');
+
+    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/users/2`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ phone: '+79990000002' }),
+    });
+
+    assert.equal(forbiddenResponse.status, 403);
+  } finally {
+    await stopTestServer(server);
+  }
+});

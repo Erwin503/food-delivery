@@ -17,6 +17,7 @@ import {
   setCompanyManager,
   setCompanyManagerByCode,
   updateCompany,
+  updateCompanyUserProfile,
 } from '../controllers/companies.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
@@ -427,6 +428,39 @@ router.delete('/companies/:id', authenticateToken, checkRole(['admin']), deleteC
  *               $ref: '#/components/schemas/User'
  */
 router.get('/companies/:id/users', authenticateToken, checkRole(['admin', 'manager']), getCompanyUsers);
+/**
+ * @swagger
+ * /companies/users/{userId}:
+ *   put:
+ *     summary: Update a company user's personal and contact information
+ *     tags: [Companies]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProfileRequest'
+ *     responses:
+ *       200:
+ *         description: User updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       403:
+ *         description: Manager can update only employees of their own company
+ *       404:
+ *         description: User is not assigned to a company
+ */
+router.put('/companies/users/:userId', authenticateToken, checkRole(['admin', 'manager']), updateCompanyUserProfile);
 router.post('/companies/:id/users', authenticateToken, checkRole(['admin']), assignCompanyUser);
 
 /**
