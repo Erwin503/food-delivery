@@ -431,7 +431,7 @@ serialTest('PUT /api/companies/:id/users/:userId/limit lets manager set limit on
       body: JSON.stringify({ orderLimitCents: 95000 }),
     });
 
-    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/1/users/2/limit`, {
+    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/2/users/3/limit`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${managerToken()}`,
@@ -900,7 +900,7 @@ serialTest('PUT /api/companies/users/:userId lets a manager edit employee contac
     assert.equal(payload.fullName, 'Иван Обновлённый');
     assert.equal(payload.phone, '+79990000044');
 
-    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/users/2`, {
+    const forbiddenResponse = await fetch(`${baseUrl}/api/companies/users/3`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${managerToken()}`,
@@ -910,6 +910,27 @@ serialTest('PUT /api/companies/users/:userId lets a manager edit employee contac
     });
 
     assert.equal(forbiddenResponse.status, 403);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('PUT /api/companies/:id/users/:userId/limit lets a manager change their own limit', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/companies/1/users/2/limit`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${managerToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ orderLimitCents: 250000 }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.orderLimitCents, 250000);
   } finally {
     await stopTestServer(server);
   }

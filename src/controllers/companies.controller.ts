@@ -553,7 +553,7 @@ export const updateCompanyUserProfile = async (req: AuthRequest, res: Response, 
     await requireManagerOrAdminForCompany(req, companyId);
     await requireCompanyMember(companyId, userId);
 
-    if (actor.role === 'manager' && targetUser.role !== 'employee') {
+    if (actor.role === 'manager' && targetUser.id !== actor.id && targetUser.role !== 'employee') {
       throw new AppError('Manager can edit only employees of their company', 403);
     }
 
@@ -890,7 +890,7 @@ export const setCompanyUserLimit = async (req: AuthRequest, res: Response, next:
     await requireManagerOrAdminForCompany(req, companyId);
     const targetUser = await requireCompanyMember(companyId, userId);
 
-    if (actor.role === 'manager' && targetUser.role !== 'employee') {
+    if (actor.role === 'manager' && targetUser.id !== actor.id && targetUser.role !== 'employee') {
       throw new AppError('Manager can set limits only for employees of their company', 403);
     }
 
