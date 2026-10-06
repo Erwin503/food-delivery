@@ -49,12 +49,13 @@ const companyColumns = [
   'updated_at',
   'deleted_at',
 ] as const;
-const toCompanyDto = (company: CompanyModel) => ({
+const toCompanyDto = (company: CompanyModel, employeeCount: number) => ({
   id: company.id,
   name: company.name,
   description: company.description,
   address: company.address,
   debtCents: company.debt_cents,
+  employeeCount,
   createdAt: toIsoString(company.created_at),
   updatedAt: toIsoString(company.updated_at),
 });
@@ -111,6 +112,25 @@ const loadCompanyManagers = async (companyIds: number[]): Promise<Map<number, Us
 
   return new Map(managers.map((manager) => [manager.manager_company_id, manager]));
 };
+
+const loadCompanyEmployeeCounts = async (companyIds: number[]): Promise<Map<number, number>> => {
+  if (companyIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db('users')
+    .select('company_id')
+    .count<{ company_id: number; employee_count: number | string }[]>({ employee_count: 'id' })
+    .whereIn('company_id', companyIds)
+    .whereIn('role', ['employee', 'manager'])
+    .whereNull('deleted_at')
+    .groupBy('company_id');
+
+  return new Map(rows.map((row) => [Number(row.company_id), Number(row.employee_count)]));
+};
+
+const loadCompanyEmployeeCount = async (companyId: number): Promise<number> =>
+  (await loadCompanyEmployeeCounts([companyId])).get(companyId) ?? 0;
 
 const loadCompanyById = async (id: number): Promise<CompanyModel | undefined> =>
   db<CompanyModel>('companies')
@@ -322,14 +342,18 @@ export const getCompanies = async (req: AuthRequest, res: Response, next: NextFu
       query.clone().limit(limit).offset((page - 1) * limit),
     ]);
     const totalItems = Number(totalRow?.total ?? 0);
-    const managers = await loadCompanyManagers(companies.map((company) => company.id));
+    const companyIds = companies.map((company) => company.id);
+    const [managers, employeeCounts] = await Promise.all([
+      loadCompanyManagers(companyIds),
+      loadCompanyEmployeeCounts(companyIds),
+    ]);
 
     res.json({
       items: companies.map((company) => {
         const manager = managers.get(company.id);
 
         return {
-          ...toCompanyDto(company),
+          ...toCompanyDto(company, employeeCounts.get(company.id) ?? 0),
           manager: manager ? toCompanyManagerDto(manager) : null,
         };
       }),
@@ -350,7 +374,7 @@ export const getCompanyById = async (req: AuthRequest, res: Response, next: Next
     const companyId = parseRequiredId(req.params.id, 'Company id');
 
     const company = await requireCompanyVisibility(req, companyId);
-    res.json(toCompanyDto(company));
+    res.json(toCompanyDto(company, await loadCompanyEmployeeCount(companyId)));
   } catch (error) {
     next(error);
   }
@@ -411,7 +435,7 @@ export const createCompany = async (req: AuthRequest, res: Response, next: NextF
     }
 
     const company = await requireCompany(companyId);
-    res.status(201).json(toCompanyDto(company));
+    res.status(201).json(toCompanyDto(company, await loadCompanyEmployeeCount(companyId)));
   } catch (error) {
     next(error);
   }
@@ -497,7 +521,7 @@ export const updateCompany = async (req: AuthRequest, res: Response, next: NextF
     }
 
     const company = await requireCompany(companyId);
-    res.json(toCompanyDto(company));
+    res.json(toCompanyDto(company, await loadCompanyEmployeeCount(companyId)));
   } catch (error) {
     next(error);
   }

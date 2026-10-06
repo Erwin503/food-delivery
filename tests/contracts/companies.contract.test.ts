@@ -65,6 +65,7 @@ serialTest('GET /api/companies returns all visible companies for an authenticate
     assert.equal(adminPayload.pagination.totalPages, 2);
     assert.equal(adminPayload.items[0].manager.email, 'manager.romashka@cook.local');
     assert.equal('role' in adminPayload.items[0].manager, false);
+    assert.equal(adminPayload.items[0].employeeCount, 3);
     assert.equal(adminSecondPagePayload.items.length, 1);
     assert.equal(adminSecondPagePayload.items[0].id, 3);
     assert.equal(adminSecondPagePayload.items[0].manager, null);
@@ -72,6 +73,7 @@ serialTest('GET /api/companies returns all visible companies for an authenticate
     assert.equal(managerPayload.items[0].id, 1);
     assert.equal(managerPayload.items[0].manager.email, 'manager.romashka@cook.local');
     assert.equal('role' in managerPayload.items[0].manager, false);
+    assert.equal(managerPayload.items[0].employeeCount, 3);
     assert.equal(typeof adminPayload.items[0].debtCents, 'number');
   } finally {
     await stopTestServer(server);
@@ -98,7 +100,9 @@ serialTest('GET /api/companies/:id returns a single company by id', async () => 
     const payload = await response.json();
     const employeePayload = await employeeOwnCompanyResponse.json();
     assert.equal(payload.name, 'ООО Ромашка');
+    assert.equal(payload.employeeCount, 3);
     assert.equal(employeePayload.id, 1);
+    assert.equal(employeePayload.employeeCount, 3);
   } finally {
     await stopTestServer(server);
   }

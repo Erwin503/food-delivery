@@ -34,6 +34,7 @@ const router = Router();
  *         - id
  *         - name
  *         - debtCents
+ *         - employeeCount
  *         - createdAt
  *         - updatedAt
  *       properties:
@@ -49,6 +50,9 @@ const router = Router();
  *           nullable: true
  *         debtCents:
  *           type: integer
+ *         employeeCount:
+ *           type: integer
+ *           description: Number of active employees and managers assigned to the company.
  *         createdAt:
  *           type: string
  *           format: date-time

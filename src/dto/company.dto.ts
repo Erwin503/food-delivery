@@ -6,6 +6,7 @@ export interface CompanyDto {
   description: string | null;
   address: string | null;
   debtCents: number;
+  employeeCount: number;
   createdAt: string;
   updatedAt: string;
 }
