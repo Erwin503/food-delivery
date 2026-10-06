@@ -273,7 +273,7 @@ router.get('/routes/:id/companies', authenticateToken, checkRole(['admin']), get
  * @swagger
  * /routes/{id}/companies:
  *   post:
- *     summary: Assign a company to a route
+ *     summary: Assign a company to a route, replacing its previous route assignment
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []

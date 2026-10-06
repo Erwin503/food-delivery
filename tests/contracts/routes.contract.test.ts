@@ -83,6 +83,9 @@ serialTest('POST /api/routes creates a route for admin', async () => {
     const payload = await response.json();
     assert.equal(payload.name, 'Evening route');
     assert.equal(payload.companies.length, 2);
+    const companyAssignments = await db('route_companies').whereIn('company_id', [1, 2]);
+    assert.equal(companyAssignments.length, 2);
+    assert.equal(companyAssignments.every((row) => row.route_id === payload.id), true);
   } finally {
     await stopTestServer(server);
   }
@@ -116,6 +119,9 @@ serialTest('PUT /api/routes/:id updates route fields', async () => {
       payload.companies.map((item: { id: number }) => item.id),
       [1, 3]
     );
+    const companyAssignments = await db('route_companies').whereIn('company_id', [1, 3]);
+    assert.equal(companyAssignments.length, 2);
+    assert.equal(companyAssignments.every((row) => row.route_id === 2), true);
   } finally {
     await stopTestServer(server);
   }
@@ -198,6 +204,8 @@ serialTest('POST /api/routes/:id/companies assigns a company to a route', async 
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.some((item: { id: number }) => item.id === 3), true);
+    const assignments = await db('route_companies').where({ company_id: 3 });
+    assert.deepEqual(assignments.map((row) => row.route_id), [1]);
   } finally {
     await stopTestServer(server);
   }

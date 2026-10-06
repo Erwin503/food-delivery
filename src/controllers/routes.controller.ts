@@ -1,4 +1,5 @@
 import { NextFunction, Response } from 'express';
+import { Knex } from 'knex';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -62,6 +63,58 @@ const validateRouteTimes = (departureAt: string, orderAcceptanceEndsAt: string) 
   if (cutoffDate.getTime() >= departureDate.getTime()) {
     throw new AppError('Order acceptance end time must be before departure time', 400);
   }
+};
+
+const normalizeCompanyIds = (value: unknown): number[] => {
+  if (isOmittedValue(value)) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AppError('companyIds must be an array', 400);
+  }
+
+  const companyIds = value.map(Number);
+
+  if (companyIds.some((companyId) => !Number.isInteger(companyId) || companyId < 1)) {
+    throw new AppError('companyIds must contain positive integers', 400);
+  }
+
+  return [...new Set(companyIds)];
+};
+
+const replaceRouteCompanies = async (
+  trx: Knex.Transaction,
+  routeId: number,
+  companyIds: number[],
+  clearCurrentRoute: boolean
+): Promise<void> => {
+  if (clearCurrentRoute) {
+    await trx('route_companies').where({ route_id: routeId }).delete();
+  }
+
+  if (companyIds.length === 0) {
+    return;
+  }
+
+  const companies = await trx<CompanyModel>('companies')
+    .select('id')
+    .whereIn('id', companyIds)
+    .whereNull('deleted_at')
+    .forUpdate();
+
+  if (companies.length !== companyIds.length) {
+    throw new AppError('One or more companies were not found', 404);
+  }
+
+  await trx('route_companies').whereIn('company_id', companyIds).delete();
+  await trx('route_companies').insert(
+    companyIds.map((companyId) => ({
+      route_id: routeId,
+      company_id: companyId,
+      created_at: new Date(),
+    }))
+  );
 };
 
 const requireRoute = async (id: number): Promise<RouteModel> =>
@@ -130,6 +183,7 @@ export const createRoute = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     validateRouteTimes(departureAt, orderAcceptanceEndsAt);
+    const normalizedCompanyIds = normalizeCompanyIds(companyIds);
 
     const now = new Date();
     const insertedId = await db.transaction(async (trx) => {
@@ -145,15 +199,7 @@ export const createRoute = async (req: AuthRequest, res: Response, next: NextFun
 
       const routeId = Array.isArray(result) ? Number(result[0]) : Number(result);
 
-      if (Array.isArray(companyIds) && companyIds.length > 0) {
-        const rows = companyIds.map((companyId: number) => ({
-          route_id: routeId,
-          company_id: Number(companyId),
-          created_at: now,
-        }));
-
-        await trx('route_companies').insert(rows);
-      }
+      await replaceRouteCompanies(trx, routeId, normalizedCompanyIds, false);
 
       return routeId;
     });
@@ -204,18 +250,8 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     await db.transaction(async (trx) => {
       await trx('routes').where({ id: routeId }).update(patch);
 
-      if (!isOmittedValue(req.body.companyIds) && Array.isArray(req.body.companyIds)) {
-        await trx('route_companies').where({ route_id: routeId }).delete();
-
-        if (req.body.companyIds.length > 0) {
-          await trx('route_companies').insert(
-            req.body.companyIds.map((companyId: number) => ({
-              route_id: routeId,
-              company_id: Number(companyId),
-              created_at: new Date(),
-            }))
-          );
-        }
+      if (!isOmittedValue(req.body.companyIds)) {
+        await replaceRouteCompanies(trx, routeId, normalizeCompanyIds(req.body.companyIds), true);
       }
     });
 
@@ -280,14 +316,15 @@ export const assignRouteCompany = async (req: AuthRequest, res: Response, next: 
       throw new AppError('Company not found', 404);
     }
 
-    await db('route_companies')
-      .insert({
+    await db.transaction(async (trx) => {
+      await trx('companies').where({ id: companyId }).forUpdate().first();
+      await trx('route_companies').where({ company_id: companyId }).delete();
+      await trx('route_companies').insert({
         route_id: routeId,
         company_id: companyId,
         created_at: new Date(),
-      })
-      .onConflict(['route_id', 'company_id'])
-      .ignore();
+      });
+    });
 
     const companies = await loadRouteCompanies(routeId);
     res.json(companies);
