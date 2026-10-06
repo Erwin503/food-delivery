@@ -631,15 +631,10 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
   const routeId = Array.isArray(routeInsert) ? Number(routeInsert[0]) : Number(routeInsert);
   createdRouteIds.push(routeId);
 
-  await db('route_companies').insert([
-    { route_id: routeId, company_id: 1, created_at: now },
-    { route_id: routeId, company_id: 2, created_at: now },
-  ]);
-
   const testOrders = [
     {
       order_number: `${testOrderPrefix}-001`,
-      user_id: 4,
+      user_id: 2,
       company_id: 1,
       status: 'created',
       items: [
@@ -656,7 +651,7 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
     },
     {
       order_number: `${testOrderPrefix}-003`,
-      user_id: 6,
+      user_id: 3,
       company_id: 2,
       status: 'paid',
       items: [
@@ -682,6 +677,7 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
       company_paid_cents: 0,
       employee_debt_cents: 0,
       created_at: now,
+      order_day: now.toISOString().slice(0, 10),
       updated_at: now,
       deleted_at: null,
       cancelled_at: null,

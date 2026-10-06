@@ -337,6 +337,8 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  *               $ref: '#/components/schemas/Order'
  *       403:
  *         description: Only employees or managers can create orders
+ *       409:
+ *         description: The user already has an order today or no active route is available
  */
 router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), createOrder);
 

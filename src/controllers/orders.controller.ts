@@ -70,6 +70,11 @@ const hasActiveSubscription = (
 ): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
 
+const toLocalDateOnly = (date: Date): string => {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
 type RequestedOrderItem = {
   dishId: number;
   qty: number;
@@ -327,11 +332,36 @@ const loadPricingSourcesForRequestedItems = async (
 };
 
 const getUserOrderAvailability = async (userId: number) => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  const existingOrder = await db<OrderModel>('orders')
+    .select(...orderColumns)
+    .where({ user_id: userId })
+    .andWhere('created_at', '>=', start)
+    .andWhere('created_at', '<', end)
+    .orderBy('created_at', 'desc')
+    .first();
+
   return {
-    canCreateOrder: true,
-    existingOrder: null as OrderModel | null,
+    canCreateOrder: !existingOrder,
+    existingOrder: existingOrder ?? null,
   };
 };
+
+const ensureUserCanCreateOrderToday = async (userId: number): Promise<void> => {
+  const availability = await getUserOrderAvailability(userId);
+
+  if (!availability.canCreateOrder) {
+    throw new AppError('User can create only one order per day', 409);
+  }
+};
+
+const isDuplicateKeyError = (error: unknown): boolean =>
+  (error as { code?: string }).code === 'ER_DUP_ENTRY';
 
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
@@ -609,6 +639,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       throw new AppError('User must belong to a company to create an order', 409);
     }
 
+    await ensureUserCanCreateOrderToday(currentUser.id);
+
     const companyId = currentUser.company_id;
     const company = await loadCompany(companyId);
 
@@ -643,6 +675,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         company_paid_cents: 0,
         employee_debt_cents: 0,
         created_at: now,
+        order_day: toLocalDateOnly(now),
         updated_at: now,
         deleted_at: null,
         cancelled_at: null,
@@ -683,6 +716,15 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     const createdItems = await loadOrderItems(inserted);
     res.status(201).json(toOrderDto(order, createdItems));
   } catch (error) {
+    if (isDuplicateKeyError(error) && req.user?.id) {
+      const availability = await getUserOrderAvailability(req.user.id);
+
+      if (!availability.canCreateOrder) {
+        next(new AppError('User can create only one order per day', 409));
+        return;
+      }
+    }
+
     next(error);
   }
 };

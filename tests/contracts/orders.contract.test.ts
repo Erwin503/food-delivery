@@ -17,6 +17,16 @@ const managerToken = () =>
 const employeeToken = () =>
   generateToken({ id: 4, email: 'employee.ivanov@cook.local', role: 'employee', companyId: 1 });
 
+const moveOrderToPreviousDay = async (orderId = 1): Promise<void> => {
+  const previousDay = new Date();
+  previousDay.setDate(previousDay.getDate() - 1);
+
+  await db('orders').where({ id: orderId }).update({
+    created_at: previousDay,
+    updated_at: previousDay,
+  });
+};
+
 test.beforeEach(async () => {
   await lockAndSeedDb(db);
 });
@@ -71,9 +81,9 @@ serialTest('GET /api/orders/my returns all current user orders including a soft-
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     await db('orders').where({ id: 1 }).update({
       deleted_at: new Date(),
-      updated_at: new Date(),
     });
 
     const createResponse = await fetch(`${baseUrl}/api/orders`, {
@@ -108,7 +118,7 @@ serialTest('GET /api/orders/my returns all current user orders including a soft-
   }
 });
 
-serialTest('GET /api/orders/can-create-today always allows creating another order', async () => {
+serialTest('GET /api/orders/can-create-today returns the existing daily order', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -126,8 +136,8 @@ serialTest('GET /api/orders/can-create-today always allows creating another orde
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.equal(payload.canCreateOrder, true);
-    assert.equal(payload.existingOrder, null);
+    assert.equal(payload.canCreateOrder, false);
+    assert.equal(payload.existingOrder.id, 1);
   } finally {
     await stopTestServer(server);
   }
@@ -137,6 +147,7 @@ serialTest('POST /api/orders creates a draft order from dishes for employee role
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     const response = await fetch(`${baseUrl}/api/orders`, {
       method: 'POST',
       headers: {
@@ -508,10 +519,11 @@ serialTest('PATCH /api/orders/:id/status does not add debt when order fits into 
   }
 });
 
-serialTest('POST /api/orders allows creating multiple orders on the same day for the same user', async () => {
+serialTest('POST /api/orders rejects a second order on the same day for the same user', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     const firstResponse = await fetch(`${baseUrl}/api/orders`, {
       method: 'POST',
       headers: {
@@ -535,10 +547,41 @@ serialTest('POST /api/orders allows creating multiple orders on the same day for
     });
 
     assert.equal(firstResponse.status, 201);
-    assert.equal(secondResponse.status, 201);
+    assert.equal(secondResponse.status, 409);
 
     const userOrders = await db('orders').where({ user_id: 4 });
-    assert.equal(userOrders.length, 3);
+    assert.equal(userOrders.length, 2);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('POST /api/orders allows only one of two concurrent daily orders', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await moveOrderToPreviousDay();
+
+    const createOrder = () => fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [{ dishId: 1, qty: 1 }],
+      }),
+    });
+
+    const responses = await Promise.all([createOrder(), createOrder()]);
+    assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ordersToday = await db('orders')
+      .where({ user_id: 4 })
+      .andWhere('created_at', '>=', today);
+    assert.equal(ordersToday.length, 1);
   } finally {
     await stopTestServer(server);
   }
@@ -548,6 +591,7 @@ serialTest('POST /api/orders rejects creation after route cutoff time', async ()
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     await db('routes').where({ id: 2 }).update({
       order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
     });
