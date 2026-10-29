@@ -179,6 +179,7 @@ serialTest('POST /api/orders/calculate returns total by items without creating a
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     const response = await fetch(`${baseUrl}/api/orders/calculate`, {
       method: 'POST',
       headers: {
@@ -213,6 +214,7 @@ serialTest('POST /api/orders/calculate applies subscription discount to only one
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await moveOrderToPreviousDay();
     const response = await fetch(`${baseUrl}/api/orders/calculate`, {
       method: 'POST',
       headers: {
@@ -242,6 +244,37 @@ serialTest('POST /api/orders/calculate applies subscription discount to only one
     assert.equal(pepperoni.lineTotalCents, 74900);
     assert.equal(drink.discountedQty, 1);
     assert.equal(drink.lineTotalCents, 27800);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('POST /api/orders/calculate reports an existing order for the current day', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('orders').where({ id: 1 }).update({
+      created_at: new Date(),
+      updated_at: new Date(),
+      status: 'created',
+      deleted_at: null,
+      cancelled_at: null,
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/calculate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        items: [{ dishId: 1, qty: 1 }],
+      }),
+    });
+
+    assert.equal(response.status, 409);
+    const payload = await response.json();
+    assert.equal(payload.message, 'User already has an order today');
   } finally {
     await stopTestServer(server);
   }

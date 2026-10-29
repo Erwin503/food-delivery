@@ -285,6 +285,8 @@ router.get('/orders/can-create-today', authenticateToken, checkRole(['employee',
  *               $ref: '#/components/schemas/CalculateOrderResponse'
  *       403:
  *         description: Only employees or managers can calculate orders
+ *       409:
+ *         description: The user already has an order today
  */
 router.post('/orders/calculate', authenticateToken, checkRole(['employee', 'manager']), calculateOrder);
 

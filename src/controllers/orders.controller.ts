@@ -356,7 +356,7 @@ const ensureUserCanCreateOrderToday = async (userId: number): Promise<void> => {
   const availability = await getUserOrderAvailability(userId);
 
   if (!availability.canCreateOrder) {
-    throw new AppError('User can create only one order per day', 409);
+    throw new AppError('User already has an order today', 409);
   }
 };
 
@@ -720,7 +720,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       const availability = await getUserOrderAvailability(req.user.id);
 
       if (!availability.canCreateOrder) {
-        next(new AppError('User can create only one order per day', 409));
+        next(new AppError('User already has an order today', 409));
         return;
       }
     }
@@ -737,6 +737,8 @@ export const calculateOrder = async (req: AuthRequest, res: Response, next: Next
     if (!currentUser.company_id) {
       throw new AppError('User must belong to a company to calculate an order', 409);
     }
+
+    await ensureUserCanCreateOrderToday(currentUser.id);
 
     const calculated = await calculateDraftOrderFromItems(items, currentUser);
 
