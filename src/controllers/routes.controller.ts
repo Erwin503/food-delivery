@@ -136,6 +136,30 @@ const loadRouteCompanies = async (routeId: number): Promise<Array<Pick<CompanyMo
     .whereNull('c.deleted_at')
     .orderBy('c.id', 'asc');
 
+export const getAvailableRouteCompanies = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await requireAuthenticatedUser(req.user);
+
+    const companies = await db<CompanyModel>('companies as c')
+      .leftJoin('route_companies as rc', 'rc.company_id', 'c.id')
+      .leftJoin('routes as r', function joinActiveRoute() {
+        this.on('r.id', '=', 'rc.route_id').andOnNull('r.deleted_at');
+      })
+      .select(...companyColumns.map((column) => `c.${column}`))
+      .whereNull('c.deleted_at')
+      .whereNull('r.id')
+      .orderBy('c.id', 'asc');
+
+    res.json(companies);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);

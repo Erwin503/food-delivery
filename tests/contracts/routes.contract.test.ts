@@ -188,6 +188,27 @@ serialTest('GET /api/routes/:id/companies returns companies assigned to a route'
   }
 });
 
+serialTest('GET /api/routes/available-companies returns only companies without an active route', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('routes').where({ id: 3 }).update({
+      deleted_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    const response = await fetch(`${baseUrl}/api/routes/available-companies`, {
+      headers: { Authorization: `Bearer ${adminToken()}` },
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.deepEqual(payload.map((company: { id: number }) => company.id), [3]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 serialTest('POST /api/routes/:id/companies assigns a company to a route', async () => {
   const { server, baseUrl } = await startTestServer();
 

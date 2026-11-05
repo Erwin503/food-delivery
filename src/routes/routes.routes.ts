@@ -3,6 +3,7 @@ import {
   assignRouteCompany,
   createRoute,
   deleteRoute,
+  getAvailableRouteCompanies,
   getRouteById,
   getRouteCompanies,
   getRoutes,
@@ -13,6 +14,34 @@ import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
 
 const router = Router();
+
+/**
+ * @swagger
+ * /routes/available-companies:
+ *   get:
+ *     summary: List companies that are not assigned to an active route
+ *     description: A company can belong to only one active route. Companies whose previous route was archived are available for assignment again.
+ *     tags: [Routes]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Companies available for route assignment
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/RouteCompany'
+ *       403:
+ *         description: Admin access required
+ */
+router.get(
+  '/routes/available-companies',
+  authenticateToken,
+  checkRole(['admin']),
+  getAvailableRouteCompanies
+);
 
 /**
  * @swagger
@@ -65,6 +94,7 @@ const router = Router();
  *             $ref: '#/components/schemas/RouteCompany'
  *     CreateRouteRequest:
  *       type: object
+ *       description: A company can belong to only one active route. Assigning it here moves it from its previous route.
  *       required:
  *         - name
  *         - departureAt
@@ -88,6 +118,7 @@ const router = Router();
  *             type: integer
  *     UpdateRouteRequest:
  *       type: object
+ *       description: A company can belong to only one active route. Updating companyIds moves listed companies from their previous routes.
  *       properties:
  *         name:
  *           type: string
