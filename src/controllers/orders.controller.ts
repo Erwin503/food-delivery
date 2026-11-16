@@ -877,34 +877,35 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
   }
 };
 
-export const updateOrderDish = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const orderId = parseRequiredId(req.params.id, 'Order id');
-    const dishId = Number(req.body.dishId);
-    const qty = Number(req.body.qty);
-
-    if (!dishId || !qty || qty < 1) {
-      throw new AppError('order id, dishId, and qty >= 1 are required', 400);
-    }
+    const requestedItems = parseCreateOrderItems(req.body.items);
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
     await ensureOrderIsEditable(order);
+    const pricingSources = await loadPricingSourcesForRequestedItems(requestedItems);
+    const now = new Date();
 
     await db.transaction(async (trx) => {
-      const item = await trx<OrderItemModel>('order_items')
-        .where({ order_id: orderId, dish_id: dishId })
-        .first();
+      await trx('order_items').where({ order_id: orderId }).delete();
 
-      if (!item) {
-        throw new AppError('Order item not found', 404);
-      }
-
-      await trx('order_items').where({ order_id: orderId, dish_id: dishId }).update({
-        qty,
-        discounted_qty: 0,
-        updated_at: new Date(),
-      });
+      await trx('order_items').insert(
+        pricingSources.map((item) => ({
+          order_id: orderId,
+          dish_id: item.dishId,
+          category_id: item.categoryId,
+          qty: item.qty,
+          price_cents: item.basePriceCents,
+          base_price_cents: item.basePriceCents,
+          discount_price_cents: item.discountPriceCents,
+          discounted_qty: 0,
+          line_total_cents: item.qty * item.basePriceCents,
+          created_at: now,
+          updated_at: now,
+        }))
+      );
 
       await recalculateOrderTotals(trx, orderId);
     });

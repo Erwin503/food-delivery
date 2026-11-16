@@ -418,7 +418,7 @@ serialTest('POST /api/orders/:id/dishes adds an item and snapshots current dish 
   }
 });
 
-serialTest('PUT /api/orders/:id/dishes changes item quantity for owner or manager', async () => {
+serialTest('PUT /api/orders/:id/dishes fully replaces order items', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
@@ -428,15 +428,71 @@ serialTest('PUT /api/orders/:id/dishes changes item quantity for owner or manage
         Authorization: `Bearer ${employeeToken()}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ dishId: 1, qty: 3 }),
+      body: JSON.stringify({
+        items: [
+          { dishId: 4, qty: 1 },
+          { dishId: 4, qty: 1 },
+        ],
+      }),
     });
 
     assert.equal(response.status, 200);
     const payload = await response.json();
-    const updatedItem = payload.items.find((item: { dishId: number }) => item.dishId === 1);
-    assert.equal(updatedItem.qty, 3);
-    assert.equal(updatedItem.discountedQty, 1);
-    assert.equal(updatedItem.lineTotalCents, 173700);
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].dishId, 4);
+    assert.equal(payload.items[0].qty, 2);
+    assert.equal(payload.items[0].discountedQty, 1);
+    assert.equal(payload.items[0].lineTotalCents, 27800);
+
+    const storedItems = await db('order_items').where({ order_id: 1 });
+    assert.equal(storedItems.length, 1);
+    assert.equal(storedItems[0].dish_id, 4);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('PUT /api/orders/:id/dishes keeps old items when a replacement dish is invalid', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/1/dishes`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ items: [{ dishId: 999999, qty: 1 }] }),
+    });
+
+    assert.equal(response.status, 404);
+    const storedItems = await db('order_items').where({ order_id: 1 }).orderBy('dish_id', 'asc');
+    assert.deepEqual(storedItems.map((item) => item.dish_id), [1, 2]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('PUT /api/orders/:id/dishes rejects full replacement after route cutoff', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('routes').where({ id: 2 }).update({
+      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    });
+
+    const response = await fetch(`${baseUrl}/api/orders/1/dishes`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${employeeToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ items: [{ dishId: 4, qty: 1 }] }),
+    });
+
+    assert.equal(response.status, 409);
+    const storedItems = await db('order_items').where({ order_id: 1 }).orderBy('dish_id', 'asc');
+    assert.deepEqual(storedItems.map((item) => item.dish_id), [1, 2]);
   } finally {
     await stopTestServer(server);
   }

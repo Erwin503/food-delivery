@@ -50,6 +50,10 @@ export interface UpsertOrderDishDto {
   qty: number;
 }
 
+export interface ReplaceOrderDishesDto {
+  items: UpsertOrderDishDto[];
+}
+
 export interface PatchOrderStatusDto {
   status: OrderStatus;
 }

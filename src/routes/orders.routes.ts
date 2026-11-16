@@ -9,9 +9,9 @@ import {
   getOrderById,
   getOrders,
   patchOrderStatus,
+  replaceOrderDishes,
   removeOrderDish,
   updateOrder,
-  updateOrderDish,
 } from '../controllers/orders.controller';
 import { authenticateToken } from '../middleware/authMiddleware';
 import { checkRole } from '../middleware/checkRole';
@@ -161,6 +161,17 @@ const router = Router();
  *           type: integer
  *           minimum: 1
  *           example: 2
+ *     ReplaceOrderDishesRequest:
+ *       type: object
+ *       required:
+ *         - items
+ *       properties:
+ *         items:
+ *           type: array
+ *           minItems: 1
+ *           description: Complete new dish list. Existing order items are fully replaced.
+ *           items:
+ *             $ref: '#/components/schemas/OrderDishRequest'
  *     OrderStatusRequest:
  *       type: object
  *       required:
@@ -434,7 +445,8 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  * @swagger
  * /orders/{id}/dishes:
  *   put:
- *     summary: Update quantity of a dish in an order
+ *     summary: Replace all dishes in an order
+ *     description: Accepts the complete new dish list and fully replaces the previous order items. Dish validation, pricing, subscription discounts, order status, and route cutoff restrictions are the same as for order creation.
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -449,7 +461,7 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/OrderDishRequest'
+ *             $ref: '#/components/schemas/ReplaceOrderDishesRequest'
  *     responses:
  *       200:
  *         description: Updated order with items
@@ -457,10 +469,14 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Order'
+ *       400:
+ *         description: A non-empty valid items list is required
  *       404:
- *         description: Order item not found
+ *         description: Order or dish not found
+ *       409:
+ *         description: Order status or route cutoff does not allow editing
  */
-router.put('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'manager', 'admin']), updateOrderDish);
+router.put('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'manager', 'admin']), replaceOrderDishes);
 
 /**
  * @swagger
