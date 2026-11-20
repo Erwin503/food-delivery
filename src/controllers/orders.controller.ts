@@ -1,4 +1,5 @@
 import { NextFunction, Response } from 'express';
+import type { Knex } from 'knex';
 import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -65,6 +66,8 @@ const routeColumns = [
   'deleted_at',
 ] as const;
 
+const orderReadTransaction = { isolationLevel: 'repeatable read' } as const;
+
 const hasActiveSubscription = (
   user?: Pick<UserModel, 'subscription_expires_at'> | null
 ): boolean =>
@@ -98,6 +101,25 @@ type OrderItemWithDishName = OrderItemModel & {
   dish_name: string;
 };
 
+type DetailedOrderItem = OrderItemWithDishName & {
+  dish_is_active: boolean;
+  dish_deleted_at: Date | null;
+};
+
+type OrderRoute = Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'>;
+
+const toOrderItemDto = (item: OrderItemWithDishName) => ({
+  dishId: item.dish_id,
+  dishName: item.dish_name,
+  categoryId: item.category_id,
+  qty: item.qty,
+  priceCents: item.price_cents,
+  basePriceCents: item.base_price_cents,
+  discountPriceCents: item.discount_price_cents,
+  discountedQty: item.discounted_qty,
+  lineTotalCents: item.line_total_cents,
+});
+
 const toOrderDto = (order: OrderModel, items?: OrderItemWithDishName[]) => ({
   id: order.id,
   orderNumber: order.order_number,
@@ -113,32 +135,22 @@ const toOrderDto = (order: OrderModel, items?: OrderItemWithDishName[]) => ({
   employeeDebtCents: order.employee_debt_cents,
   createdAt: toNullableIsoString(order.created_at),
   updatedAt: toNullableIsoString(order.updated_at),
-  items: items?.map((item) => ({
-    dishId: item.dish_id,
-    dishName: item.dish_name,
-    categoryId: item.category_id,
-    qty: item.qty,
-    priceCents: item.price_cents,
-    basePriceCents: item.base_price_cents,
-    discountPriceCents: item.discount_price_cents,
-    discountedQty: item.discounted_qty,
-    lineTotalCents: item.line_total_cents,
-  })),
+  items: items?.map(toOrderItemDto),
 });
 
 const loadCurrentUser = async (req: AuthRequest): Promise<UserModel> => {
   return requireAuthenticatedUser(req.user);
 };
 
-const loadOrderById = async (id: number): Promise<OrderModel | undefined> =>
-  db<OrderModel>('orders')
+const loadOrderById = async (id: number, connection = db): Promise<OrderModel | undefined> =>
+  connection<OrderModel>('orders')
     .select(...orderColumns)
     .where({ id })
     .whereNull('deleted_at')
     .first();
 
-const loadOrderItems = async (orderId: number): Promise<OrderItemWithDishName[]> =>
-  db<OrderItemModel>('order_items as oi')
+const loadOrderItems = async (orderId: number, connection = db): Promise<DetailedOrderItem[]> =>
+  connection<OrderItemModel>('order_items as oi')
     .join('dishes as d', 'd.id', 'oi.dish_id')
     .select(
       'oi.order_id',
@@ -152,17 +164,22 @@ const loadOrderItems = async (orderId: number): Promise<OrderItemWithDishName[]>
       'oi.line_total_cents',
       'oi.created_at',
       'oi.updated_at',
-      'd.name as dish_name'
+      'd.name as dish_name',
+      'd.is_active as dish_is_active',
+      'd.deleted_at as dish_deleted_at'
     )
     .where({ 'oi.order_id': orderId })
-    .orderBy('oi.dish_id', 'asc') as unknown as Promise<OrderItemWithDishName[]>;
+    .orderBy('oi.dish_id', 'asc') as unknown as Promise<DetailedOrderItem[]>;
 
-const loadOrderItemsByOrderIds = async (orderIds: number[]): Promise<Map<number, OrderItemWithDishName[]>> => {
+const loadOrderItemsByOrderIds = async (
+  orderIds: number[],
+  connection = db
+): Promise<Map<number, OrderItemWithDishName[]>> => {
   if (orderIds.length === 0) {
     return new Map();
   }
 
-  const items = await db<OrderItemModel>('order_items as oi')
+  const items = await connection<OrderItemModel>('order_items as oi')
     .join('dishes as d', 'd.id', 'oi.dish_id')
     .select(
       'oi.order_id',
@@ -193,8 +210,14 @@ const loadOrderItemsByOrderIds = async (orderIds: number[]): Promise<Map<number,
   return itemsByOrderId;
 };
 
-const requireOrder = async (id: number): Promise<OrderModel> =>
-  requireEntity(() => loadOrderById(id), 'Order not found');
+const requireOrder = async (id: number, connection = db): Promise<OrderModel> =>
+  requireEntity(() => loadOrderById(id, connection), 'Order not found');
+
+const lockOrder = (trx: Knex.Transaction, id: number): Promise<OrderModel> =>
+  requireEntity(
+    () => trx<OrderModel>('orders').select(...orderColumns).where({ id }).whereNull('deleted_at').forUpdate().first(),
+    'Order not found'
+  );
 
 const requireDish = async (id: number): Promise<DishModel> => {
   const dish = await requireEntity(
@@ -221,18 +244,15 @@ const loadCompany = async (id: number): Promise<{ id: number; address: string | 
     .whereNull('deleted_at')
     .first();
 
-const loadRouteById = async (
-  id: number
-): Promise<Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'> | undefined> =>
-  db<RouteModel>('routes')
+const selectOrderRoute = (id: number, connection = db) =>
+  connection<RouteModel>('routes')
     .select('id', 'departure_at', 'order_acceptance_ends_at')
     .where({ id })
-    .whereNull('deleted_at')
-    .first();
+    .whereNull('deleted_at');
 
 const getAvailableRouteForCompany = async (
   companyId: number
-): Promise<Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'> | undefined> =>
+): Promise<OrderRoute | undefined> =>
   db<RouteModel>('routes as r')
     .join('route_companies as rc', 'rc.route_id', 'r.id')
     .select('r.id', 'r.departure_at', 'r.order_acceptance_ends_at')
@@ -331,6 +351,51 @@ const loadPricingSourcesForRequestedItems = async (
   });
 };
 
+const loadReplacementPricing = async (
+  trx: Knex.Transaction,
+  orderId: number,
+  requestedItems: RequestedOrderItem[]
+): Promise<OrderPricingSource[]> => {
+  const items = normalizeRequestedItems(requestedItems);
+  const dishes = await trx<DishModel>('dishes')
+    .select('id', 'category_id', 'base_price_cents', 'discount_price_cents', 'is_active', 'deleted_at')
+    .whereIn('id', items.map((item) => item.dishId))
+    .orderBy('id')
+    .forShare();
+  const dishesById = new Map(dishes.map((dish) => [dish.id, dish]));
+  const previousItems = await trx<OrderItemModel>('order_items')
+    .select('dish_id', 'category_id', 'qty', 'base_price_cents', 'discount_price_cents')
+    .where({ order_id: orderId });
+  const previousItemsById = new Map(previousItems.map((item) => [item.dish_id, item]));
+
+  return items.map(({ dishId, qty }) => {
+    const dish = dishesById.get(dishId);
+    if (!dish) throw new AppError('Dish not found', 404);
+
+    if (!dish.is_active || dish.deleted_at) {
+      const previousItem = previousItemsById.get(dishId);
+      if (!previousItem || qty > previousItem.qty) {
+        throw new AppError(`Dish ${dishId} is unavailable above quantity ${previousItem?.qty ?? 0}`, 422);
+      }
+      return {
+        dishId,
+        qty,
+        categoryId: previousItem.category_id,
+        basePriceCents: previousItem.base_price_cents,
+        discountPriceCents: previousItem.discount_price_cents,
+      };
+    }
+
+    return {
+      dishId,
+      qty,
+      categoryId: dish.category_id,
+      basePriceCents: dish.base_price_cents,
+      discountPriceCents: dish.discount_price_cents,
+    };
+  });
+};
+
 const getUserOrderAvailability = async (userId: number) => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -363,24 +428,25 @@ const ensureUserCanCreateOrderToday = async (userId: number): Promise<void> => {
 const isDuplicateKeyError = (error: unknown): boolean =>
   (error as { code?: string }).code === 'ER_DUP_ENTRY';
 
+const ensureOrderViewer = (user: UserModel, order: OrderModel): void => {
+  if (user.id !== order.user_id && !hasCompanyManagementAccess(user, order.company_id)) {
+    throw new AppError('Forbidden', 403);
+  }
+};
+
 const requireOrderViewer = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await loadCurrentUser(req);
-
-  if (hasCompanyManagementAccess(user, order.company_id)) {
-    return user;
-  }
-
-  if (user.id === order.user_id) {
-    return user;
-  }
-
-  throw new AppError('Forbidden', 403);
+  ensureOrderViewer(user, order);
+  return user;
 };
+
+const canEditOrder = (user: UserModel, order: OrderModel): boolean =>
+  user.role === 'admin' || user.role === 'manager' || user.id === order.user_id;
 
 const requireOrderEditor = async (req: AuthRequest, order: OrderModel): Promise<UserModel> => {
   const user = await requireOrderViewer(req, order);
 
-  if (user.role === 'admin' || user.role === 'manager' || user.id === order.user_id) {
+  if (canEditOrder(user, order)) {
     return user;
   }
 
@@ -397,20 +463,44 @@ const requireManagerOrAdminForOrder = async (req: AuthRequest, order: OrderModel
   throw new AppError('Forbidden', 403);
 };
 
-const ensureOrderIsEditable = async (order: OrderModel) => {
+const isOrderAcceptanceOpen = (route: OrderRoute): boolean =>
+  new Date(route.order_acceptance_ends_at).getTime() > Date.now();
+
+const ensureOrderAcceptanceIsOpen = (route: OrderRoute): void => {
+  if (!isOrderAcceptanceOpen(route)) {
+    throw new AppError('Order acceptance time has ended for this route', 409);
+  }
+};
+
+const toOrderDetailsDto = (
+  order: OrderModel,
+  items: DetailedOrderItem[],
+  viewer: UserModel,
+  route: OrderRoute | undefined
+) => ({
+  ...toOrderDto(order),
+  items: items.map((item) => ({
+    ...toOrderItemDto(item),
+    canIncrease: Boolean(item.dish_is_active) && !item.dish_deleted_at,
+  })),
+  canEdit: canEditOrder(viewer, order) && order.status === 'created' && Boolean(route && isOrderAcceptanceOpen(route)),
+  orderAcceptanceEndsAt: toNullableIsoString(route?.order_acceptance_ends_at),
+});
+
+const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction): Promise<OrderRoute> => {
   if (order.status !== 'created') {
     throw new AppError('Only created orders can be edited', 409);
   }
 
-  const route = await loadRouteById(order.route_id);
+  const routeQuery = selectOrderRoute(order.route_id, trx ?? db);
+  const route = await (trx ? routeQuery.forShare() : routeQuery).first();
 
   if (!route) {
     throw new AppError('Route not found', 404);
   }
 
-  if (new Date(route.order_acceptance_ends_at).getTime() <= Date.now()) {
-    throw new AppError('Order acceptance time has ended for this route', 409);
-  }
+  ensureOrderAcceptanceIsOpen(route);
+  return route;
 };
 
 const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<void> => {
@@ -588,11 +678,16 @@ export const getOrderById = async (req: AuthRequest, res: Response, next: NextFu
   try {
     const orderId = parseRequiredId(req.params.id, 'Order id');
 
-    const order = await requireOrder(orderId);
-    await requireOrderViewer(req, order);
-    const items = await loadOrderItems(orderId);
+    const viewer = await loadCurrentUser(req);
+    const details = await db.transaction(async (trx) => {
+      const order = await requireOrder(orderId, trx);
+      ensureOrderViewer(viewer, order);
+      const items = await loadOrderItems(orderId, trx);
+      const route = await selectOrderRoute(order.route_id, trx).first();
+      return toOrderDetailsDto(order, items, viewer, route);
+    }, orderReadTransaction);
 
-    res.json(toOrderDto(order, items));
+    res.json(details);
   } catch (error) {
     next(error);
   }
@@ -602,15 +697,17 @@ export const getMyOrders = async (req: AuthRequest, res: Response, next: NextFun
   try {
     const currentUser = await loadCurrentUser(req);
 
-    const orders = await db<OrderModel>('orders')
-      .select(...orderColumns)
-      .where({ user_id: currentUser.id })
-      .orderBy('created_at', 'desc')
-      .orderBy('id', 'desc');
+    const orders = await db.transaction(async (trx) => {
+      const myOrders = await trx<OrderModel>('orders')
+        .select(...orderColumns)
+        .where({ user_id: currentUser.id })
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc');
+      const itemsByOrderId = await loadOrderItemsByOrderIds(myOrders.map((order) => order.id), trx);
+      return myOrders.map((order) => toOrderDto(order, itemsByOrderId.get(order.id) ?? []));
+    }, orderReadTransaction);
 
-    const itemsByOrderId = await loadOrderItemsByOrderIds(orders.map((order) => order.id));
-
-    res.json(orders.map((order) => toOrderDto(order, itemsByOrderId.get(order.id) ?? [])));
+    res.json(orders);
   } catch (error) {
     next(error);
   }
@@ -755,12 +852,6 @@ export const updateOrder = async (req: AuthRequest, res: Response, next: NextFun
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
 
-    if (['completed', 'cancelled'].includes(order.status)) {
-      throw new AppError('Completed or cancelled orders cannot be updated', 409);
-    }
-
-    await ensureOrderIsEditable(order);
-
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
@@ -773,6 +864,11 @@ export const updateOrder = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     await db.transaction(async (trx) => {
+      const lockedOrder = await lockOrder(trx, orderId);
+      if (['completed', 'cancelled'].includes(lockedOrder.status)) {
+        throw new AppError('Completed or cancelled orders cannot be updated', 409);
+      }
+      await ensureOrderIsEditable(lockedOrder, trx);
       await trx('orders').where({ id: orderId }).update(patch);
       await recalculateOrderTotals(trx, orderId);
     });
@@ -792,14 +888,13 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
     const order = await requireOrder(orderId);
     const currentUser = await requireOrderEditor(req, order);
 
-    if (['completed', 'cancelled'].includes(order.status)) {
-      throw new AppError('Order cannot be cancelled', 409);
-    }
-
-    await ensureOrderIsEditable(order);
-
-    const now = new Date();
     await db.transaction(async (trx) => {
+      const lockedOrder = await lockOrder(trx, orderId);
+      if (['completed', 'cancelled'].includes(lockedOrder.status)) {
+        throw new AppError('Order cannot be cancelled', 409);
+      }
+      await ensureOrderIsEditable(lockedOrder, trx);
+      const now = new Date();
       await trx('orders').where({ id: orderId }).update({
         status: 'cancelled',
         cancelled_at: now,
@@ -808,7 +903,7 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
 
       await insertStatusHistory(trx, {
         order_id: orderId,
-        from_status: order.status,
+        from_status: lockedOrder.status,
         to_status: 'cancelled',
         changed_by_user_id: currentUser.id,
         created_at: now,
@@ -836,9 +931,11 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
     await ensureOrderIsEditable(order);
 
     const dish = await requireDish(dishId);
-    const now = new Date();
 
     await db.transaction(async (trx) => {
+      const lockedOrder = await lockOrder(trx, orderId);
+      await ensureOrderIsEditable(lockedOrder, trx);
+      const now = new Date();
       const existingItem = await trx<OrderItemModel>('order_items')
         .where({ order_id: orderId, dish_id: dishId })
         .first();
@@ -883,12 +980,15 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
     const requestedItems = parseCreateOrderItems(req.body.items);
 
     const order = await requireOrder(orderId);
-    await requireOrderEditor(req, order);
+    const editor = await requireOrderEditor(req, order);
     await ensureOrderIsEditable(order);
-    const pricingSources = await loadPricingSourcesForRequestedItems(requestedItems);
-    const now = new Date();
 
-    await db.transaction(async (trx) => {
+    const details = await db.transaction(async (trx) => {
+      const lockedOrder = await lockOrder(trx, orderId);
+      const route = await ensureOrderIsEditable(lockedOrder, trx);
+      const pricingSources = await loadReplacementPricing(trx, orderId, requestedItems);
+      ensureOrderAcceptanceIsOpen(route);
+      const now = new Date();
       await trx('order_items').where({ order_id: orderId }).delete();
 
       await trx('order_items').insert(
@@ -908,11 +1008,12 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
       );
 
       await recalculateOrderTotals(trx, orderId);
+      const updatedOrder = await lockOrder(trx, orderId);
+      const items = await loadOrderItems(orderId, trx);
+      return toOrderDetailsDto(updatedOrder, items, editor, route);
     });
 
-    const updatedOrder = await requireOrder(orderId);
-    const items = await loadOrderItems(orderId);
-    res.json(toOrderDto(updatedOrder, items));
+    res.json(details);
   } catch (error) {
     next(error);
   }
@@ -925,9 +1026,10 @@ export const removeOrderDish = async (req: AuthRequest, res: Response, next: Nex
 
     const order = await requireOrder(orderId);
     await requireOrderEditor(req, order);
-    await ensureOrderIsEditable(order);
 
     await db.transaction(async (trx) => {
+      const lockedOrder = await lockOrder(trx, orderId);
+      await ensureOrderIsEditable(lockedOrder, trx);
       const deleted = await trx('order_items').where({ order_id: orderId, dish_id: dishId }).delete();
 
       if (!deleted) {
@@ -952,8 +1054,7 @@ export const patchOrderStatus = async (req: AuthRequest, res: Response, next: Ne
       throw new AppError('Order id and status are required', 400);
     }
 
-    const order = await requireOrder(orderId);
-    const currentUser = await requireOrderViewer(req, order);
+    const currentUser = await requireOrderViewer(req, await requireOrder(orderId));
 
     const allowedTransitions: Record<OrderModel['status'], OrderModel['status'][]> = {
       created: ['paid', 'cancelled'],
@@ -964,19 +1065,20 @@ export const patchOrderStatus = async (req: AuthRequest, res: Response, next: Ne
       cancelled: [],
     };
 
-    if (!allowedTransitions[order.status].includes(nextStatus)) {
-      throw new AppError('Status transition is not allowed', 409);
-    }
-
-    const managerCanControl = hasCompanyManagementAccess(currentUser, order.company_id);
-    const ownerCanPay = currentUser.id === order.user_id && order.status === 'created' && nextStatus === 'paid';
-
-    if (!managerCanControl && !ownerCanPay) {
-      throw new AppError('Forbidden', 403);
-    }
-
-    const now = new Date();
     await db.transaction(async (trx) => {
+      const order = await lockOrder(trx, orderId);
+      if (!allowedTransitions[order.status].includes(nextStatus)) {
+        throw new AppError('Status transition is not allowed', 409);
+      }
+
+      const managerCanControl = hasCompanyManagementAccess(currentUser, order.company_id);
+      const ownerCanPay = currentUser.id === order.user_id && order.status === 'created' && nextStatus === 'paid';
+
+      if (!managerCanControl && !ownerCanPay) {
+        throw new AppError('Forbidden', 403);
+      }
+
+      const now = new Date();
       if (order.status === 'created' && nextStatus === 'paid') {
         await recalculateOrderTotals(trx, orderId);
 

@@ -72,6 +72,9 @@ serialTest('GET /api/orders/:id returns order details with items for owner, mana
     const payload = await response.json();
     assert.equal(payload.id, 1);
     assert.equal(payload.items.length, 2);
+    assert.equal(payload.canEdit, true);
+    const route = await db('routes').where({ id: payload.routeId }).first();
+    assert.equal(payload.orderAcceptanceEndsAt, route.order_acceptance_ends_at.toISOString());
   } finally {
     await stopTestServer(server);
   }
@@ -443,6 +446,8 @@ serialTest('PUT /api/orders/:id/dishes fully replaces order items', async () => 
     assert.equal(payload.items[0].qty, 2);
     assert.equal(payload.items[0].discountedQty, 1);
     assert.equal(payload.items[0].lineTotalCents, 27800);
+    assert.equal(payload.canEdit, true);
+    assert.ok(payload.orderAcceptanceEndsAt);
 
     const storedItems = await db('order_items').where({ order_id: 1 });
     assert.equal(storedItems.length, 1);
@@ -473,6 +478,48 @@ serialTest('PUT /api/orders/:id/dishes keeps old items when a replacement dish i
   }
 });
 
+serialTest('PUT replacement retains the saved prices of inactive and removed order dishes', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    await db('dishes').where({ id: 1 }).update({ is_active: false, base_price_cents: 90000 });
+    await db('dishes').where({ id: 2 }).update({ deleted_at: new Date(), discount_price_cents: 1 });
+    const headers = {
+      Authorization: `Bearer ${employeeToken()}`,
+      'Content-Type': 'application/json',
+    };
+    const replace = (items: { dishId: number; qty: number }[]) =>
+      fetch(`${baseUrl}/api/orders/1/dishes`, { method: 'PUT', headers, body: JSON.stringify({ items }) });
+
+    const details = await fetch(`${baseUrl}/api/orders/1`, { headers });
+    assert.equal(details.status, 200);
+    const previous = await details.json();
+    assert.equal(previous.items[0].canIncrease, false);
+    assert.equal(previous.items[1].canIncrease, false);
+
+    const rejectedIncrease = await replace([{ dishId: 1, qty: 2 }]);
+    assert.equal(rejectedIncrease.status, 422);
+    assert.equal((await rejectedIncrease.json()).message, 'Dish 1 is unavailable above quantity 1');
+    const rejectedAddition = await replace([{ dishId: 5, qty: 1 }]);
+    assert.equal(rejectedAddition.status, 422);
+    assert.equal((await rejectedAddition.json()).message, 'Dish 5 is unavailable above quantity 0');
+
+    const replacement = await replace([
+      { dishId: 1, qty: 1 },
+      { dishId: 2, qty: 1 },
+      { dishId: 4, qty: 2 },
+    ]);
+    assert.equal(replacement.status, 200);
+    const updated = await replacement.json();
+    assert.deepEqual(updated.items.slice(0, 2), previous.items);
+    assert.equal(updated.items[2].dishId, 4);
+    assert.equal(updated.items[2].qty, 2);
+    assert.equal(updated.items[2].canIncrease, true);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 serialTest('PUT /api/orders/:id/dishes rejects full replacement after route cutoff', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -493,6 +540,113 @@ serialTest('PUT /api/orders/:id/dishes rejects full replacement after route cuto
     assert.equal(response.status, 409);
     const storedItems = await db('order_items').where({ order_id: 1 }).orderBy('dish_id', 'asc');
     assert.deepEqual(storedItems.map((item) => item.dish_id), [1, 2]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('GET details and PUT replacement close at the exact route cutoff', async () => {
+  const { server, baseUrl } = await startTestServer();
+  const originalNow = Date.now;
+
+  try {
+    const cutoffMs = Math.floor(Date.now() / 1000) * 1000 + 60_000;
+    const cutoff = new Date(cutoffMs);
+    await db('routes').where({ id: 2 }).update({ order_acceptance_ends_at: cutoff });
+
+    let now = cutoffMs - 1;
+    Date.now = () => now;
+    const headers = {
+      Authorization: `Bearer ${employeeToken()}`,
+      'Content-Type': 'application/json',
+    };
+    const getOrder = () => fetch(`${baseUrl}/api/orders/1`, { headers });
+
+    const before = await getOrder();
+    assert.equal(before.status, 200);
+    const beforePayload = await before.json();
+    assert.equal(beforePayload.orderAcceptanceEndsAt, cutoff.toISOString());
+    assert.equal(beforePayload.canEdit, true);
+
+    now = cutoffMs;
+    const response = await fetch(`${baseUrl}/api/orders/1/dishes`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ items: [{ dishId: 4, qty: 1 }] }),
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).message, 'Order acceptance time has ended for this route');
+
+    const atCutoff = await getOrder();
+    assert.equal(atCutoff.status, 200);
+    const atCutoffPayload = await atCutoff.json();
+    assert.equal(atCutoffPayload.canEdit, false);
+    assert.equal(atCutoffPayload.orderAcceptanceEndsAt, cutoff.toISOString());
+    assert.deepEqual(atCutoffPayload.items, beforePayload.items);
+    assert.equal(atCutoffPayload.totalCents, beforePayload.totalCents);
+  } finally {
+    Date.now = originalNow;
+    await stopTestServer(server);
+  }
+});
+
+serialTest('A concurrent payment and dish replacement use the same order totals', async () => {
+  const { server, baseUrl } = await startTestServer();
+
+  try {
+    const headers = {
+      Authorization: `Bearer ${employeeToken()}`,
+      'Content-Type': 'application/json',
+    };
+    const beforeUser = await db('users').where({ id: 4 }).first();
+    const beforeCompany = await db('companies').where({ id: 1 }).first();
+
+    const [replacement, payment, concurrentDetails, concurrentList] = await Promise.all([
+      fetch(`${baseUrl}/api/orders/1/dishes`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ items: [{ dishId: 4, qty: 2 }] }),
+      }),
+      fetch(`${baseUrl}/api/orders/1/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status: 'paid' }),
+      }),
+      fetch(`${baseUrl}/api/orders/1`, { headers }),
+      fetch(`${baseUrl}/api/orders/my`, { headers }),
+    ]);
+    assert.equal(payment.status, 200);
+    assert.ok([200, 409].includes(replacement.status));
+    const paidOrder = await payment.json();
+    assert.equal(paidOrder.status, 'paid');
+    assert.deepEqual(
+      paidOrder.items.map((item: { dishId: number }) => item.dishId),
+      replacement.status === 200 ? [4] : [1, 2]
+    );
+
+    const afterUser = await db('users').where({ id: 4 }).first();
+    const afterCompany = await db('companies').where({ id: 1 }).first();
+    assert.equal(afterUser.debt_cents - beforeUser.debt_cents, paidOrder.employeeDebtCents);
+    assert.equal(afterCompany.debt_cents - beforeCompany.debt_cents, paidOrder.companyPaidCents);
+
+    assert.equal(concurrentDetails.status, 200);
+    assert.equal(concurrentList.status, 200);
+    const [listedOrder] = await concurrentList.json();
+    for (const snapshot of [await concurrentDetails.json(), listedOrder]) {
+      assert.equal(
+        snapshot.subtotalCents,
+        snapshot.items.reduce((sum: number, item: { lineTotalCents: number }) => sum + item.lineTotalCents, 0)
+      );
+    }
+
+    const details = await fetch(`${baseUrl}/api/orders/1`, { headers });
+    const detailsPayload = await details.json();
+    assert.equal(detailsPayload.canEdit, false);
+    assert.deepEqual(
+      detailsPayload.items,
+      paidOrder.items.map((item: Record<string, unknown>) => ({ ...item, canIncrease: true }))
+    );
+    assert.equal(detailsPayload.totalCents, paidOrder.totalCents);
   } finally {
     await stopTestServer(server);
   }
