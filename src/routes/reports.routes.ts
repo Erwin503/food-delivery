@@ -12,6 +12,22 @@ const router = Router();
 
 /**
  * @swagger
+ * components:
+ *   headers:
+ *     ReportDay:
+ *       description: Календарный день отчёта в BUSINESS_TIME_ZONE (по умолчанию Europe/Moscow).
+ *       schema:
+ *         type: string
+ *         format: date
+ *     ReportValidForMs:
+ *       description: Миллисекунды от отправки ответа до окончания дня отчёта. Ноль означает, что день уже закончился.
+ *       schema:
+ *         type: integer
+ *         minimum: 0
+ */
+
+/**
+ * @swagger
  * /reports/orders/today.pdf:
  *   get:
  *     summary: Скачать PDF-отчёт по сегодняшним заказам, сгруппированным по компаниям
@@ -21,6 +37,11 @@ const router = Router();
  *     responses:
  *       200:
  *         description: PDF-файл с таблицей заказов на сегодня
+ *         headers:
+ *           X-Report-Day:
+ *             $ref: '#/components/headers/ReportDay'
+ *           X-Report-Valid-For-Ms:
+ *             $ref: '#/components/headers/ReportValidForMs'
  *         content:
  *           application/pdf:
  *             schema:
@@ -42,6 +63,11 @@ router.get('/reports/orders/today.pdf', authenticateToken, checkRole(['admin']),
  *     responses:
  *       200:
  *         description: PDF-файл со списком блюд и итоговыми количествами
+ *         headers:
+ *           X-Report-Day:
+ *             $ref: '#/components/headers/ReportDay'
+ *           X-Report-Valid-For-Ms:
+ *             $ref: '#/components/headers/ReportValidForMs'
  *         content:
  *           application/pdf:
  *             schema:
@@ -63,6 +89,11 @@ router.get('/reports/dishes/today.pdf', authenticateToken, checkRole(['admin']),
  *     responses:
  *       200:
  *         description: PDF-файл с компактными карточками для печати и нарезки
+ *         headers:
+ *           X-Report-Day:
+ *             $ref: '#/components/headers/ReportDay'
+ *           X-Report-Valid-For-Ms:
+ *             $ref: '#/components/headers/ReportValidForMs'
  *         content:
  *           application/pdf:
  *             schema:

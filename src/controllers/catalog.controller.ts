@@ -5,6 +5,7 @@ import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CategoryModel, DishModel, UserModel } from '../models';
 import { buildUploadedFileUrl } from '../middleware/uploadMiddleware';
+import { BUSINESS_TIME_ZONE } from '../utils/businessTime';
 import { toIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
 import { parseRequiredId } from '../utils/requestParams';
@@ -42,7 +43,6 @@ type DishListFilters = {
 const DEFAULT_DISHES_PAGE_SIZE = 20;
 const MAX_DISHES_PAGE_SIZE = 100;
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
-const BUSINESS_TIME_ZONE = process.env.BUSINESS_TIME_ZONE?.trim() || 'Europe/Moscow';
 
 const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());

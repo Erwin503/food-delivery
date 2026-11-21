@@ -3,6 +3,7 @@ import db from '../db/knex';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { OrderStatusHistoryModel, UserModel } from '../models';
+import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay } from '../utils/businessTime';
 import { applyReportFont, createPdfBuffer, createZipArchive, sendPdf, sendZip } from '../utils/reportFiles';
 import { requireAuthenticatedUser } from '../utils/userQueries';
 
@@ -16,7 +17,7 @@ type TodayOrderRow = {
   user_name: string | null;
   route_id: number;
   route_name: string;
-  departure_at: string | Date;
+  departure_at: Date;
   dish_name: string | null;
   qty: number | null;
   base_price_cents: number | null;
@@ -46,7 +47,7 @@ type AggregatedOrder = {
   userName: string | null;
   status: string;
   routeName: string;
-  departureAt: string | Date;
+  departureAt: Date;
   totalCents: number;
   dishes: OrderDish[];
 };
@@ -59,7 +60,7 @@ type CompanyOrders = {
 type RouteOrders = {
   routeId: number;
   routeName: string;
-  departureAt: string | Date;
+  departureAt: Date;
   companies: CompanyOrders[];
 };
 
@@ -81,30 +82,24 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Отменён',
 };
 
-const getTodayRange = () => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return { start, end };
-};
-
-const formatDateTime = (value: string | Date): string =>
+const formatDateTime = (value: Date): string =>
   new Intl.DateTimeFormat('ru-RU', {
+    timeZone: BUSINESS_TIME_ZONE,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(value);
 
-const formatTime = (value: string | Date): string =>
+const formatTime = (value: Date): string =>
   new Intl.DateTimeFormat('ru-RU', {
+    timeZone: BUSINESS_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(value);
+
+const sqlTimestamp = (value: Date) => db.raw('FROM_UNIXTIME(?)', [value.getTime() / 1000]);
 
 const formatMoney = (cents: number): string => `${(cents / 100).toFixed(2)} \u20bd`;
 
@@ -115,10 +110,8 @@ const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
   }
 };
 
-const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
-  const { start, end } = getTodayRange();
-
-  return db('orders as o')
+const loadTodayOrders = async ({ start, end }: BusinessDay): Promise<TodayOrderRow[]> => {
+  const rows = await db('orders as o')
     .join('companies as c', 'c.id', 'o.company_id')
     .join('users as u', 'u.id', 'o.user_id')
     .join('routes as r', 'r.id', 'o.route_id')
@@ -134,7 +127,7 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
       'u.full_name as user_name',
       'r.id as route_id',
       'r.name as route_name',
-      'r.departure_at',
+      db.raw('UNIX_TIMESTAMP(r.departure_at) as departure_at'),
       'd.name as dish_name',
       'oi.qty',
       'oi.base_price_cents',
@@ -146,26 +139,26 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
     .whereNull('c.deleted_at')
     .whereNull('u.deleted_at')
     .whereNull('r.deleted_at')
-    .where('r.departure_at', '>=', start)
-    .andWhere('r.departure_at', '<', end)
+    .where('r.departure_at', '>=', sqlTimestamp(start))
+    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .orderBy('r.departure_at', 'asc')
     .orderBy('c.name', 'asc')
     .orderBy('u.full_name', 'asc')
     .orderBy('o.id', 'asc')
     .orderBy('d.name', 'asc');
+
+  return rows.map((row) => ({ ...row, departure_at: new Date(Number(row.departure_at) * 1000) }));
 };
 
-const loadTodayDishSummary = async (): Promise<TodayDishSummaryRow[]> => {
-  const { start, end } = getTodayRange();
-
+const loadTodayDishSummary = async ({ start, end }: BusinessDay): Promise<TodayDishSummaryRow[]> => {
   return db('orders as o')
     .join('routes as r', 'r.id', 'o.route_id')
     .join('order_items as oi', 'oi.order_id', 'o.id')
     .join('dishes as d', 'd.id', 'oi.dish_id')
     .whereNull('o.deleted_at')
     .whereNull('r.deleted_at')
-    .where('r.departure_at', '>=', start)
-    .andWhere('r.departure_at', '<', end)
+    .where('r.departure_at', '>=', sqlTimestamp(start))
+    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .groupBy('d.id', 'd.name')
     .select(
       'd.name as dish_name',
@@ -297,13 +290,13 @@ const drawTableHeader = (
     .stroke('#B8C2CC');
 };
 
-const buildOrdersReportPdf = async (): Promise<Buffer> => {
-  const routes = aggregateOrdersByRoute(await loadTodayOrders());
+const buildOrdersReportPdf = async (day: BusinessDay): Promise<Buffer> => {
+  const routes = aggregateOrdersByRoute(await loadTodayOrders(day));
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Заказы на сегодня', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (routes.length === 0) {
@@ -417,13 +410,13 @@ const buildOrdersReportPdf = async (): Promise<Buffer> => {
   });
 };
 
-const buildDishesReportPdf = async (): Promise<Buffer> => {
-  const rows = await loadTodayDishSummary();
+const buildDishesReportPdf = async (day: BusinessDay): Promise<Buffer> => {
+  const rows = await loadTodayDishSummary(day);
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Список блюд на сегодня', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (rows.length === 0) {
@@ -552,13 +545,13 @@ const drawStickerCell = (
   doc.restore();
 };
 
-const buildLabelsReportPdf = async (): Promise<Buffer> => {
-  const orders = buildStickerOrders(await loadTodayOrders());
+const buildLabelsReportPdf = async (day: BusinessDay): Promise<Buffer> => {
+  const orders = buildStickerOrders(await loadTodayOrders(day));
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Наклейки на заказы', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.2);
     doc
       .fontSize(10)
@@ -609,19 +602,18 @@ const cleanupTemporaryReportData = async (orderIds: number[], routeIds: number[]
   }
 };
 
-const createTemporaryOrdersForReportTest = async (adminId: number) => {
+const createTemporaryOrdersForReportTest = async (adminId: number, day: BusinessDay) => {
   const createdOrderIds: number[] = [];
   const createdRouteIds: number[] = [];
-  const testOrderPrefix = `TEST-RPT-${Date.now()}`;
-  const now = new Date();
-  const departureAt = new Date(now);
-  departureAt.setHours(Math.max(now.getHours() + 2, 12), 0, 0, 0);
+  const now = day.capturedAt;
+  const testOrderPrefix = `TEST-RPT-${now.getTime()}`;
+  const departureAt = new Date(day.start.getTime() + (day.end.getTime() - day.start.getTime()) / 2);
   const cutoffAt = new Date(departureAt.getTime() - 60 * 60 * 1000);
 
   const routeInsert = await db('routes').insert({
     name: `Тестовый рейс отчётов ${testOrderPrefix}`,
-    departure_at: departureAt,
-    order_acceptance_ends_at: cutoffAt,
+    departure_at: sqlTimestamp(departureAt),
+    order_acceptance_ends_at: sqlTimestamp(cutoffAt),
     description: 'Временный рейс для проверки PDF-отчётов',
     created_at: now,
     updated_at: now,
@@ -730,44 +722,28 @@ const createTemporaryOrdersForReportTest = async (adminId: number) => {
   return { createdOrderIds, createdRouteIds };
 };
 
-export const downloadTodayOrdersReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'orders-today.pdf', await buildOrdersReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
+const downloadTodayReport = (fileName: string, buildPdf: (day: BusinessDay) => Promise<Buffer>) =>
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await requireAuthenticatedUser(req.user);
+      const day = getBusinessDay();
+      const pdf = await buildPdf(day);
+      const validForMs = Math.max(0, day.end.getTime() - Date.now());
+      res.set({
+        'Cache-Control': 'private, no-store',
+        'X-Report-Day': day.day,
+        'X-Report-Valid-For-Ms': String(validForMs),
+      });
+      res.append('Access-Control-Expose-Headers', 'X-Report-Day, X-Report-Valid-For-Ms');
+      sendPdf(res, fileName, pdf);
+    } catch (error) {
+      next(error);
+    }
+  };
 
-export const downloadTodayDishesReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'dishes-today.pdf', await buildDishesReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const downloadTodayLabelsReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'labels-today.pdf', await buildLabelsReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
+export const downloadTodayOrdersReport = downloadTodayReport('orders-today.pdf', buildOrdersReportPdf);
+export const downloadTodayDishesReport = downloadTodayReport('dishes-today.pdf', buildDishesReportPdf);
+export const downloadTodayLabelsReport = downloadTodayReport('labels-today.pdf', buildLabelsReportPdf);
 
 export const runTodayReportsTestRequest = async (
   req: AuthRequest,
@@ -779,15 +755,16 @@ export const runTodayReportsTestRequest = async (
 
   try {
     const admin = await requireAuthenticatedUser(req.user);
-    const temporaryData = await createTemporaryOrdersForReportTest(admin.id);
+    const day = getBusinessDay();
+    const temporaryData = await createTemporaryOrdersForReportTest(admin.id, day);
 
     createdOrderIds = temporaryData.createdOrderIds;
     createdRouteIds = temporaryData.createdRouteIds;
 
     const [ordersPdf, dishesPdf, labelsPdf] = await Promise.all([
-      buildOrdersReportPdf(),
-      buildDishesReportPdf(),
-      buildLabelsReportPdf(),
+      buildOrdersReportPdf(day),
+      buildDishesReportPdf(day),
+      buildLabelsReportPdf(day),
     ]);
 
     const archive = createZipArchive([
