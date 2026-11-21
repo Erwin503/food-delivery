@@ -1,8 +1,7 @@
 import { NextFunction, Response } from 'express';
 import db from '../db/knex';
-import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { OrderStatusHistoryModel, UserModel } from '../models';
+import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay } from '../utils/businessTime';
 import { applyReportFont, createPdfBuffer, createZipArchive, sendPdf, sendZip } from '../utils/reportFiles';
 import { requireAuthenticatedUser } from '../utils/userQueries';
 
@@ -16,7 +15,7 @@ type TodayOrderRow = {
   user_name: string | null;
   route_id: number;
   route_name: string;
-  departure_at: string | Date;
+  departure_at: Date;
   dish_name: string | null;
   qty: number | null;
   base_price_cents: number | null;
@@ -46,7 +45,7 @@ type AggregatedOrder = {
   userName: string | null;
   status: string;
   routeName: string;
-  departureAt: string | Date;
+  departureAt: Date;
   totalCents: number;
   dishes: OrderDish[];
 };
@@ -59,7 +58,7 @@ type CompanyOrders = {
 type RouteOrders = {
   routeId: number;
   routeName: string;
-  departureAt: string | Date;
+  departureAt: Date;
   companies: CompanyOrders[];
 };
 
@@ -81,30 +80,24 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Отменён',
 };
 
-const getTodayRange = () => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  return { start, end };
-};
-
-const formatDateTime = (value: string | Date): string =>
+const formatDateTime = (value: Date): string =>
   new Intl.DateTimeFormat('ru-RU', {
+    timeZone: BUSINESS_TIME_ZONE,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(value);
 
-const formatTime = (value: string | Date): string =>
+const formatTime = (value: Date): string =>
   new Intl.DateTimeFormat('ru-RU', {
+    timeZone: BUSINESS_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(value);
+
+const sqlTimestamp = (value: Date) => db.raw('FROM_UNIXTIME(?)', [value.getTime() / 1000]);
 
 const formatMoney = (cents: number): string => `${(cents / 100).toFixed(2)} \u20bd`;
 
@@ -115,10 +108,8 @@ const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
   }
 };
 
-const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
-  const { start, end } = getTodayRange();
-
-  return db('orders as o')
+const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = true): Promise<TodayOrderRow[]> => {
+  const rows: Array<Omit<TodayOrderRow, 'departure_at'> & { departure_at: string | number }> = await db('orders as o')
     .join('companies as c', 'c.id', 'o.company_id')
     .join('users as u', 'u.id', 'o.user_id')
     .join('routes as r', 'r.id', 'o.route_id')
@@ -134,7 +125,7 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
       'u.full_name as user_name',
       'r.id as route_id',
       'r.name as route_name',
-      'r.departure_at',
+      db.raw('UNIX_TIMESTAMP(r.departure_at) as departure_at'),
       'd.name as dish_name',
       'oi.qty',
       'oi.base_price_cents',
@@ -146,26 +137,30 @@ const loadTodayOrders = async (): Promise<TodayOrderRow[]> => {
     .whereNull('c.deleted_at')
     .whereNull('u.deleted_at')
     .whereNull('r.deleted_at')
-    .where('r.departure_at', '>=', start)
-    .andWhere('r.departure_at', '<', end)
+    .modify((query) => {
+      if (!includeCancelled) query.whereNot('o.status', 'cancelled');
+    })
+    .where('r.departure_at', '>=', sqlTimestamp(start))
+    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .orderBy('r.departure_at', 'asc')
     .orderBy('c.name', 'asc')
     .orderBy('u.full_name', 'asc')
     .orderBy('o.id', 'asc')
     .orderBy('d.name', 'asc');
+
+  return rows.map((row) => ({ ...row, departure_at: new Date(Number(row.departure_at) * 1000) }));
 };
 
-const loadTodayDishSummary = async (): Promise<TodayDishSummaryRow[]> => {
-  const { start, end } = getTodayRange();
-
+const loadTodayDishSummary = async ({ start, end }: BusinessDay): Promise<TodayDishSummaryRow[]> => {
   return db('orders as o')
     .join('routes as r', 'r.id', 'o.route_id')
     .join('order_items as oi', 'oi.order_id', 'o.id')
     .join('dishes as d', 'd.id', 'oi.dish_id')
     .whereNull('o.deleted_at')
     .whereNull('r.deleted_at')
-    .where('r.departure_at', '>=', start)
-    .andWhere('r.departure_at', '<', end)
+    .whereNot('o.status', 'cancelled')
+    .where('r.departure_at', '>=', sqlTimestamp(start))
+    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .groupBy('d.id', 'd.name')
     .select(
       'd.name as dish_name',
@@ -297,13 +292,13 @@ const drawTableHeader = (
     .stroke('#B8C2CC');
 };
 
-const buildOrdersReportPdf = async (): Promise<Buffer> => {
-  const routes = aggregateOrdersByRoute(await loadTodayOrders());
+const buildOrdersReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Promise<Buffer> => {
+  const routes = aggregateOrdersByRoute(rows);
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Заказы на сегодня', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (routes.length === 0) {
@@ -417,13 +412,11 @@ const buildOrdersReportPdf = async (): Promise<Buffer> => {
   });
 };
 
-const buildDishesReportPdf = async (): Promise<Buffer> => {
-  const rows = await loadTodayDishSummary();
-
+const buildDishesReportPdf = async (day: BusinessDay, rows: TodayDishSummaryRow[]): Promise<Buffer> => {
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Список блюд на сегодня', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (rows.length === 0) {
@@ -552,13 +545,13 @@ const drawStickerCell = (
   doc.restore();
 };
 
-const buildLabelsReportPdf = async (): Promise<Buffer> => {
-  const orders = buildStickerOrders(await loadTodayOrders());
+const buildLabelsReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Promise<Buffer> => {
+  const orders = buildStickerOrders(rows);
 
   return createPdfBuffer((doc) => {
     doc.fontSize(20).text('Наклейки на заказы', { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).text(`Сформировано: ${formatDateTime(new Date())}`);
+    doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.2);
     doc
       .fontSize(10)
@@ -596,210 +589,92 @@ const buildLabelsReportPdf = async (): Promise<Buffer> => {
   });
 };
 
-const cleanupTemporaryReportData = async (orderIds: number[], routeIds: number[]) => {
-  if (orderIds.length > 0) {
-    await db('order_status_history').whereIn('order_id', orderIds).delete();
-    await db('order_items').whereIn('order_id', orderIds).delete();
-    await db('orders').whereIn('id', orderIds).delete();
-  }
-
-  if (routeIds.length > 0) {
-    await db('route_companies').whereIn('route_id', routeIds).delete();
-    await db('routes').whereIn('id', routeIds).delete();
-  }
-};
-
-const createTemporaryOrdersForReportTest = async (adminId: number) => {
-  const createdOrderIds: number[] = [];
-  const createdRouteIds: number[] = [];
-  const testOrderPrefix = `TEST-RPT-${Date.now()}`;
-  const now = new Date();
-  const departureAt = new Date(now);
-  departureAt.setHours(Math.max(now.getHours() + 2, 12), 0, 0, 0);
-  const cutoffAt = new Date(departureAt.getTime() - 60 * 60 * 1000);
-
-  const routeInsert = await db('routes').insert({
-    name: `Тестовый рейс отчётов ${testOrderPrefix}`,
+const buildDemoReportRows = (day: BusinessDay) => {
+  const dishes = [
+    { name: 'Тестовое горячее', qty: 2, basePrice: 32000, discountPrice: 29000, discountedQty: 1 },
+    { name: 'Тестовый напиток', qty: 1, basePrice: 12000, discountPrice: 12000, discountedQty: 0 },
+  ].map((dish) => ({
+    dish_name: dish.name,
+    qty: dish.qty,
+    base_price_cents: dish.basePrice,
+    discount_price_cents: dish.discountPrice,
+    discounted_qty: dish.discountedQty,
+    line_total_cents: (dish.qty - dish.discountedQty) * dish.basePrice + dish.discountedQty * dish.discountPrice,
+  }));
+  const departureAt = new Date(day.start.getTime() + (day.end.getTime() - day.start.getTime()) / 2);
+  const totalCents = dishes.reduce((total, dish) => total + dish.line_total_cents, 0);
+  const orders: TodayOrderRow[] = dishes.map((dish) => ({
+    ...dish,
+    order_id: 1,
+    order_number: `TEST-RPT-${day.day}-001`,
+    status: 'paid',
+    total_cents: totalCents,
+    company_id: 1,
+    company_name: 'Тестовая компания',
+    user_name: 'Тестовый сотрудник',
+    route_id: 1,
+    route_name: 'Тестовый рейс отчётов',
     departure_at: departureAt,
-    order_acceptance_ends_at: cutoffAt,
-    description: 'Временный рейс для проверки PDF-отчётов',
-    created_at: now,
-    updated_at: now,
-    deleted_at: null,
-  });
-
-  const routeId = Array.isArray(routeInsert) ? Number(routeInsert[0]) : Number(routeInsert);
-  createdRouteIds.push(routeId);
-
-  const testOrders = [
-    {
-      order_number: `${testOrderPrefix}-001`,
-      user_id: 2,
-      company_id: 1,
-      status: 'created',
-      items: [
-        { dish_id: 1, qty: 2, price_cents: 53900, discounted_qty: 1, line_total_cents: 113800 },
-        { dish_id: 4, qty: 1, price_cents: 14900, discounted_qty: 0, line_total_cents: 14900 },
-      ],
-    },
-    {
-      order_number: `${testOrderPrefix}-002`,
-      user_id: 5,
-      company_id: 1,
-      status: 'paid',
-      items: [{ dish_id: 2, qty: 1, price_cents: 74900, discounted_qty: 0, line_total_cents: 74900 }],
-    },
-    {
-      order_number: `${testOrderPrefix}-003`,
-      user_id: 3,
-      company_id: 2,
-      status: 'paid',
-      items: [
-        { dish_id: 2, qty: 2, price_cents: 74900, discounted_qty: 0, line_total_cents: 149800 },
-        { dish_id: 4, qty: 3, price_cents: 14900, discounted_qty: 0, line_total_cents: 44700 },
-      ],
-    },
-  ] as const;
-
-  for (const testOrder of testOrders) {
-    const subtotal = testOrder.items.reduce((sum, item) => sum + item.line_total_cents, 0);
-
-    const orderInsert = await db('orders').insert({
-      order_number: testOrder.order_number,
-      user_id: testOrder.user_id,
-      company_id: testOrder.company_id,
-      route_id: routeId,
-      status: testOrder.status,
-      subtotal_cents: subtotal,
-      delivery_fee_cents: 0,
-      discount_cents: 0,
-      total_cents: subtotal,
-      company_paid_cents: 0,
-      employee_debt_cents: 0,
-      created_at: now,
-      order_day: now.toISOString().slice(0, 10),
-      updated_at: now,
-      deleted_at: null,
-      cancelled_at: null,
-    });
-
-    const orderId = Array.isArray(orderInsert) ? Number(orderInsert[0]) : Number(orderInsert);
-    createdOrderIds.push(orderId);
-
-    const dishes = await db('dishes')
-      .select('id', 'category_id', 'base_price_cents', 'discount_price_cents')
-      .whereIn(
-        'id',
-        testOrder.items.map((item) => item.dish_id)
-      );
-    const dishesById = new Map(dishes.map((dish) => [Number(dish.id), dish]));
-
-    await db('order_items').insert(
-      testOrder.items.map((item) => {
-        const dish = dishesById.get(item.dish_id);
-
-        if (!dish) {
-          throw new AppError(`Dish ${item.dish_id} not found for report test data`, 500);
-        }
-
-        return {
-          order_id: orderId,
-          dish_id: item.dish_id,
-          category_id: Number(dish.category_id),
-          qty: item.qty,
-          price_cents: item.price_cents,
-          base_price_cents: Number(dish.base_price_cents),
-          discount_price_cents: Number(dish.discount_price_cents),
-          discounted_qty: item.discounted_qty,
-          line_total_cents: item.line_total_cents,
-          created_at: now,
-          updated_at: now,
-        };
-      })
-    );
-
-    await db<OrderStatusHistoryModel>('order_status_history').insert({
-      order_id: orderId,
-      from_status: null,
-      to_status: testOrder.status,
-      changed_by_user_id: adminId,
-      created_at: now,
-    });
-  }
-
-  return { createdOrderIds, createdRouteIds };
+  }));
+  const summary: TodayDishSummaryRow[] = dishes.map((dish) => ({
+    dish_name: dish.dish_name,
+    total_qty: dish.qty,
+    company_count: 1,
+  }));
+  return { orders, summary };
 };
 
-export const downloadTodayOrdersReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'orders-today.pdf', await buildOrdersReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
+const downloadTodayReport = (fileName: string, buildPdf: (day: BusinessDay) => Promise<Buffer>) =>
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      await requireAuthenticatedUser(req.user);
+      const day = getBusinessDay();
+      const pdf = await buildPdf(day);
+      const validForMs = Math.max(0, day.end.getTime() - Date.now());
+      res.set({
+        'Cache-Control': 'private, no-store',
+        'X-Report-Day': day.day,
+        'X-Report-Valid-For-Ms': String(validForMs),
+      });
+      res.append('Access-Control-Expose-Headers', 'X-Report-Day, X-Report-Valid-For-Ms');
+      sendPdf(res, fileName, pdf);
+    } catch (error) {
+      next(error);
+    }
+  };
 
-export const downloadTodayDishesReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'dishes-today.pdf', await buildDishesReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const downloadTodayLabelsReport = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    await requireAuthenticatedUser(req.user);
-    sendPdf(res, 'labels-today.pdf', await buildLabelsReportPdf());
-  } catch (error) {
-    next(error);
-  }
-};
+export const downloadTodayOrdersReport = downloadTodayReport(
+  'orders-today.pdf', async (day) => buildOrdersReportPdf(day, await loadTodayOrders(day))
+);
+export const downloadTodayDishesReport = downloadTodayReport(
+  'dishes-today.pdf', async (day) => buildDishesReportPdf(day, await loadTodayDishSummary(day))
+);
+export const downloadTodayLabelsReport = downloadTodayReport(
+  'labels-today.pdf', async (day) => buildLabelsReportPdf(day, await loadTodayOrders(day, false))
+);
 
 export const runTodayReportsTestRequest = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
-  let createdOrderIds: number[] = [];
-  let createdRouteIds: number[] = [];
-
   try {
-    const admin = await requireAuthenticatedUser(req.user);
-    const temporaryData = await createTemporaryOrdersForReportTest(admin.id);
-
-    createdOrderIds = temporaryData.createdOrderIds;
-    createdRouteIds = temporaryData.createdRouteIds;
-
+    await requireAuthenticatedUser(req.user);
+    const day = getBusinessDay();
+    const { orders, summary } = buildDemoReportRows(day);
     const [ordersPdf, dishesPdf, labelsPdf] = await Promise.all([
-      buildOrdersReportPdf(),
-      buildDishesReportPdf(),
-      buildLabelsReportPdf(),
+      buildOrdersReportPdf(day, orders),
+      buildDishesReportPdf(day, summary),
+      buildLabelsReportPdf(day, orders),
     ]);
-
     const archive = createZipArchive([
       { filename: 'orders-today.pdf', content: ordersPdf },
       { filename: 'dishes-today.pdf', content: dishesPdf },
       { filename: 'labels-today.pdf', content: labelsPdf },
     ]);
 
-    await cleanupTemporaryReportData(createdOrderIds, createdRouteIds);
     sendZip(res, 'reports-test-run-today.zip', archive);
   } catch (error) {
-    await cleanupTemporaryReportData(createdOrderIds, createdRouteIds);
     next(error);
   }
 };

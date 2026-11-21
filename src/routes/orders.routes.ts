@@ -370,7 +370,7 @@ router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), cr
  * @swagger
  * /orders/{id}:
  *   put:
- *     summary: Update order meta fields
+ *     summary: Update order charges as an administrator
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -393,6 +393,8 @@ router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), cr
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Order'
+ *       403:
+ *         description: Only administrators can change order charges
  *       409:
  *         description: Order cannot be updated in the current status
  */

@@ -12,6 +12,7 @@ import {
   RouteModel,
   UserModel,
 } from '../models';
+import { BusinessDay, getBusinessDay, getBusinessIsoWeekday } from '../utils/businessTime';
 import { hasCompanyManagementAccess } from '../utils/companyAccess';
 import { toNullableIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
@@ -50,6 +51,7 @@ const dishColumns = [
   'base_price_cents',
   'discount_price_cents',
   'is_active',
+  'available_weekdays',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -72,11 +74,6 @@ const hasActiveSubscription = (
   user?: Pick<UserModel, 'subscription_expires_at'> | null
 ): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
-
-const toLocalDateOnly = (date: Date): string => {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
 
 type RequestedOrderItem = {
   dishId: number;
@@ -104,6 +101,7 @@ type OrderItemWithDishName = OrderItemModel & {
 type DetailedOrderItem = OrderItemWithDishName & {
   dish_is_active: boolean;
   dish_deleted_at: Date | null;
+  dish_available_weekdays: DishModel['available_weekdays'];
 };
 
 type OrderRoute = Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'>;
@@ -166,7 +164,8 @@ const loadOrderItems = async (orderId: number, connection = db): Promise<Detaile
       'oi.updated_at',
       'd.name as dish_name',
       'd.is_active as dish_is_active',
-      'd.deleted_at as dish_deleted_at'
+      'd.deleted_at as dish_deleted_at',
+      'd.available_weekdays as dish_available_weekdays'
     )
     .where({ 'oi.order_id': orderId })
     .orderBy('oi.dish_id', 'asc') as unknown as Promise<DetailedOrderItem[]>;
@@ -219,10 +218,19 @@ const lockOrder = (trx: Knex.Transaction, id: number): Promise<OrderModel> =>
     'Order not found'
   );
 
-const requireDish = async (id: number): Promise<DishModel> => {
+const isAvailableOnWeekday = (value: DishModel['available_weekdays'], weekday: number): boolean => {
+  try {
+    const days = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(days) && days.includes(weekday);
+  } catch {
+    return false;
+  }
+};
+
+const requireDish = async (id: number, weekday: number, connection = db): Promise<DishModel> => {
   const dish = await requireEntity(
     () =>
-      db<DishModel>('dishes')
+      connection<DishModel>('dishes')
         .select(...dishColumns)
         .where({ id })
         .whereNull('deleted_at')
@@ -233,12 +241,15 @@ const requireDish = async (id: number): Promise<DishModel> => {
   if (!dish.is_active) {
     throw new AppError('Dish not found', 404);
   }
+  if (!isAvailableOnWeekday(dish.available_weekdays, weekday)) {
+    throw new AppError(`Dish ${id} is unavailable above quantity 0`, 422);
+  }
 
   return dish;
 };
 
-const loadCompany = async (id: number): Promise<{ id: number; address: string | null; debt_cents: number } | undefined> =>
-  db<CompanyModel>('companies')
+const loadCompany = async (id: number, connection = db): Promise<{ id: number; address: string | null; debt_cents: number } | undefined> =>
+  connection<CompanyModel>('companies')
     .select('id', 'address', 'debt_cents')
     .where({ id })
     .whereNull('deleted_at')
@@ -251,15 +262,17 @@ const selectOrderRoute = (id: number, connection = db) =>
     .whereNull('deleted_at');
 
 const getAvailableRouteForCompany = async (
-  companyId: number
+  companyId: number,
+  now: Date,
+  connection = db
 ): Promise<OrderRoute | undefined> =>
-  db<RouteModel>('routes as r')
+  connection<RouteModel>('routes as r')
     .join('route_companies as rc', 'rc.route_id', 'r.id')
     .select('r.id', 'r.departure_at', 'r.order_acceptance_ends_at')
     .where('rc.company_id', companyId)
     .whereNull('r.deleted_at')
-    .andWhere('r.order_acceptance_ends_at', '>', new Date())
-    .andWhere('r.departure_at', '>', new Date())
+    .andWhereRaw('r.order_acceptance_ends_at > FROM_UNIXTIME(?)', [now.getTime() / 1000])
+    .andWhereRaw('r.departure_at > FROM_UNIXTIME(?)', [now.getTime() / 1000])
     .orderBy('r.departure_at', 'asc')
     .first();
 
@@ -324,13 +337,15 @@ const buildPricedOrderItems = (
 };
 
 const loadPricingSourcesForRequestedItems = async (
-  items: RequestedOrderItem[]
+  items: RequestedOrderItem[],
+  weekday: number,
+  connection = db
 ): Promise<OrderPricingSource[]> => {
   const normalizedItems = normalizeRequestedItems(items);
   const dishesById = new Map<number, DishModel>();
 
   for (const item of normalizedItems) {
-    const dish = await requireDish(item.dishId);
+    const dish = await requireDish(item.dishId, weekday, connection);
     dishesById.set(item.dishId, dish);
   }
 
@@ -354,11 +369,12 @@ const loadPricingSourcesForRequestedItems = async (
 const loadReplacementPricing = async (
   trx: Knex.Transaction,
   orderId: number,
-  requestedItems: RequestedOrderItem[]
+  requestedItems: RequestedOrderItem[],
+  weekday: number
 ): Promise<OrderPricingSource[]> => {
   const items = normalizeRequestedItems(requestedItems);
   const dishes = await trx<DishModel>('dishes')
-    .select('id', 'category_id', 'base_price_cents', 'discount_price_cents', 'is_active', 'deleted_at')
+    .select('id', 'category_id', 'base_price_cents', 'discount_price_cents', 'is_active', 'deleted_at', 'available_weekdays')
     .whereIn('id', items.map((item) => item.dishId))
     .orderBy('id')
     .forShare();
@@ -372,7 +388,7 @@ const loadReplacementPricing = async (
     const dish = dishesById.get(dishId);
     if (!dish) throw new AppError('Dish not found', 404);
 
-    if (!dish.is_active || dish.deleted_at) {
+    if (!dish.is_active || dish.deleted_at || !isAvailableOnWeekday(dish.available_weekdays, weekday)) {
       const previousItem = previousItemsById.get(dishId);
       if (!previousItem || qty > previousItem.qty) {
         throw new AppError(`Dish ${dishId} is unavailable above quantity ${previousItem?.qty ?? 0}`, 422);
@@ -396,18 +412,12 @@ const loadReplacementPricing = async (
   });
 };
 
-const getUserOrderAvailability = async (userId: number) => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-
-  const existingOrder = await db<OrderModel>('orders')
+const getUserOrderAvailability = async (userId: number, day = getBusinessDay(), connection = db) => {
+  const existingOrder = await connection<OrderModel>('orders')
     .select(...orderColumns)
     .where({ user_id: userId })
-    .andWhere('created_at', '>=', start)
-    .andWhere('created_at', '<', end)
+    .andWhereRaw('created_at >= FROM_UNIXTIME(?)', [day.start.getTime() / 1000])
+    .andWhereRaw('created_at < FROM_UNIXTIME(?)', [day.end.getTime() / 1000])
     .orderBy('created_at', 'desc')
     .first();
 
@@ -417,16 +427,17 @@ const getUserOrderAvailability = async (userId: number) => {
   };
 };
 
-const ensureUserCanCreateOrderToday = async (userId: number): Promise<void> => {
-  const availability = await getUserOrderAvailability(userId);
+const ensureUserCanCreateOrderToday = async (
+  userId: number,
+  day: BusinessDay,
+  connection = db
+): Promise<void> => {
+  const availability = await getUserOrderAvailability(userId, day, connection);
 
   if (!availability.canCreateOrder) {
     throw new AppError('User already has an order today', 409);
   }
 };
-
-const isDuplicateKeyError = (error: unknown): boolean =>
-  (error as { code?: string }).code === 'ER_DUP_ENTRY';
 
 const ensureOrderViewer = (user: UserModel, order: OrderModel): void => {
   if (user.id !== order.user_id && !hasCompanyManagementAccess(user, order.company_id)) {
@@ -477,15 +488,19 @@ const toOrderDetailsDto = (
   items: DetailedOrderItem[],
   viewer: UserModel,
   route: OrderRoute | undefined
-) => ({
-  ...toOrderDto(order),
-  items: items.map((item) => ({
-    ...toOrderItemDto(item),
-    canIncrease: Boolean(item.dish_is_active) && !item.dish_deleted_at,
-  })),
-  canEdit: canEditOrder(viewer, order) && order.status === 'created' && Boolean(route && isOrderAcceptanceOpen(route)),
-  orderAcceptanceEndsAt: toNullableIsoString(route?.order_acceptance_ends_at),
-});
+) => {
+  const weekday = getBusinessIsoWeekday();
+  return {
+    ...toOrderDto(order),
+    items: items.map((item) => ({
+      ...toOrderItemDto(item),
+      canIncrease: Boolean(item.dish_is_active) && !item.dish_deleted_at &&
+        isAvailableOnWeekday(item.dish_available_weekdays, weekday),
+    })),
+    canEdit: canEditOrder(viewer, order) && order.status === 'created' && Boolean(route && isOrderAcceptanceOpen(route)),
+    orderAcceptanceEndsAt: toNullableIsoString(route?.order_acceptance_ends_at),
+  };
+};
 
 const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction): Promise<OrderRoute> => {
   if (order.status !== 'created') {
@@ -582,20 +597,6 @@ const insertStatusHistory = async (
   await trx('order_status_history').insert(payload);
 };
 
-const getNextOrderNumber = async (): Promise<string> => {
-  const now = new Date();
-  const y = now.getFullYear().toString();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const prefix = `${y}${m}${d}`;
-  const countRow = await db<OrderModel>('orders')
-    .where('order_number', 'like', `${prefix}-%`)
-    .count<{ count: number }>('id as count')
-    .first();
-  const nextNumber = String(Number(countRow?.count ?? 0) + 1).padStart(6, '0');
-  return `${prefix}-${nextNumber}`;
-};
-
 const parseCreateOrderItems = (payload: unknown): RequestedOrderItem[] => {
   if (!Array.isArray(payload) || payload.length === 0) {
     throw new AppError('Order items are required', 400);
@@ -615,10 +616,11 @@ const parseCreateOrderItems = (payload: unknown): RequestedOrderItem[] => {
 
 const calculateDraftOrderFromItems = async (
   items: RequestedOrderItem[],
-  user: Pick<UserModel, 'order_limit_cents' | 'subscription_expires_at'>
+  user: Pick<UserModel, 'order_limit_cents' | 'subscription_expires_at'>,
+  weekday: number
 ) => {
   const pricedItems = buildPricedOrderItems(
-    await loadPricingSourcesForRequestedItems(items),
+    await loadPricingSourcesForRequestedItems(items, weekday),
     hasActiveSubscription(user)
   );
 
@@ -732,36 +734,48 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     const currentUser = await loadCurrentUser(req);
     const items = parseCreateOrderItems(req.body.items);
 
-    if (!currentUser.company_id) {
-      throw new AppError('User must belong to a company to create an order', 409);
-    }
-
-    await ensureUserCanCreateOrderToday(currentUser.id);
-
-    const companyId = currentUser.company_id;
-    const company = await loadCompany(companyId);
-
-    if (!company) {
-      throw new AppError('Company not found', 404);
-    }
-
-    const route = await getAvailableRouteForCompany(companyId);
-
-    if (!route) {
-      throw new AppError('No active route is available for this company', 409);
-    }
-
-    const now = new Date();
-    const orderNumber = await getNextOrderNumber();
-    const pricedItems = buildPricedOrderItems(
-      await loadPricingSourcesForRequestedItems(items),
-      hasActiveSubscription(currentUser)
-    );
-
     const inserted = await db.transaction(async (trx) => {
+      const user = await requireEntity(
+        () => trx<UserModel>('users').select(...USER_COLUMNS)
+          .where({ id: currentUser.id }).whereNull('deleted_at').forUpdate().first(),
+        'User not found'
+      );
+      const companyId = user.company_id;
+      if (!companyId) {
+        throw new AppError('User must belong to a company to create an order', 409);
+      }
+
+      const day = getBusinessDay();
+      const now = day.capturedAt;
+      await ensureUserCanCreateOrderToday(user.id, day, trx);
+      if (!await loadCompany(companyId, trx)) {
+        throw new AppError('Company not found', 404);
+      }
+      const route = await getAvailableRouteForCompany(companyId, now, trx);
+      if (!route) {
+        throw new AppError('No active route is available for this company', 409);
+      }
+
+      const pricedItems = buildPricedOrderItems(
+        await loadPricingSourcesForRequestedItems(items, getBusinessIsoWeekday(now), trx),
+        hasActiveSubscription(user)
+      );
+
+      // A legacy date key can be occupied by an order outside the business day.
+      const staleOrder = await trx('orders')
+        .where({ user_id: user.id, order_day: day.day })
+        .andWhere(function () {
+          this.whereRaw('created_at < FROM_UNIXTIME(?)', [day.start.getTime() / 1000])
+            .orWhereRaw('created_at >= FROM_UNIXTIME(?)', [day.end.getTime() / 1000]);
+        })
+        .first('id');
+      if (staleOrder) {
+        await trx('orders').where({ id: staleOrder.id }).update({ order_day: null });
+      }
+
+      ensureOrderAcceptanceIsOpen(route);
       const result = await trx('orders').insert({
-        order_number: orderNumber,
-        user_id: currentUser.id,
+        user_id: user.id,
         company_id: companyId,
         route_id: route.id,
         status: 'created',
@@ -771,20 +785,22 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         total_cents: 0,
         company_paid_cents: 0,
         employee_debt_cents: 0,
-        created_at: now,
-        order_day: toLocalDateOnly(now),
+        created_at: trx.raw('FROM_UNIXTIME(?)', [now.getTime() / 1000]),
+        order_day: day.day,
         updated_at: now,
         deleted_at: null,
         cancelled_at: null,
       });
 
       const orderId = Array.isArray(result) ? Number(result[0]) : Number(result);
+      const orderNumber = `${day.day.replace(/-/g, '')}-${String(orderId).padStart(6, '0')}`;
+      await trx('orders').where({ id: orderId }).update({ order_number: orderNumber });
 
       await insertStatusHistory(trx, {
         order_id: orderId,
         from_status: null,
         to_status: 'created',
-        changed_by_user_id: currentUser.id,
+        changed_by_user_id: user.id,
         created_at: now,
       });
 
@@ -813,15 +829,6 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     const createdItems = await loadOrderItems(inserted);
     res.status(201).json(toOrderDto(order, createdItems));
   } catch (error) {
-    if (isDuplicateKeyError(error) && req.user?.id) {
-      const availability = await getUserOrderAvailability(req.user.id);
-
-      if (!availability.canCreateOrder) {
-        next(new AppError('User already has an order today', 409));
-        return;
-      }
-    }
-
     next(error);
   }
 };
@@ -835,9 +842,10 @@ export const calculateOrder = async (req: AuthRequest, res: Response, next: Next
       throw new AppError('User must belong to a company to calculate an order', 409);
     }
 
-    await ensureUserCanCreateOrderToday(currentUser.id);
+    const day = getBusinessDay();
+    await ensureUserCanCreateOrderToday(currentUser.id, day);
 
-    const calculated = await calculateDraftOrderFromItems(items, currentUser);
+    const calculated = await calculateDraftOrderFromItems(items, currentUser, getBusinessIsoWeekday(day.capturedAt));
 
     res.json(calculated);
   } catch (error) {
@@ -850,17 +858,26 @@ export const updateOrder = async (req: AuthRequest, res: Response, next: NextFun
     const orderId = parseRequiredId(req.params.id, 'Order id');
 
     const order = await requireOrder(orderId);
-    await requireOrderEditor(req, order);
+    const editor = await requireOrderEditor(req, order);
 
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
 
-    if ('deliveryFeeCents' in req.body) {
-      patch.delivery_fee_cents = Number(req.body.deliveryFeeCents);
-    }
-    if ('discountCents' in req.body) {
-      patch.discount_cents = Number(req.body.discountCents);
+    for (const [input, column] of [
+      ['deliveryFeeCents', 'delivery_fee_cents'],
+      ['discountCents', 'discount_cents'],
+    ] as const) {
+      if (input in req.body) {
+        if (editor.role !== 'admin') {
+          throw new AppError('Only administrators can change order charges', 403);
+        }
+        const amount = req.body[input];
+        if (!Number.isInteger(amount) || amount < 0 || amount > 0xffffffff) {
+          throw new AppError(`${input} must be a non-negative integer in cents`, 400);
+        }
+        patch[column] = amount;
+      }
     }
 
     await db.transaction(async (trx) => {
@@ -930,12 +947,11 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
     await requireOrderEditor(req, order);
     await ensureOrderIsEditable(order);
 
-    const dish = await requireDish(dishId);
-
     await db.transaction(async (trx) => {
       const lockedOrder = await lockOrder(trx, orderId);
       await ensureOrderIsEditable(lockedOrder, trx);
-      const now = new Date();
+      const now = new Date(Date.now());
+      const dish = await requireDish(dishId, getBusinessIsoWeekday(now), trx);
       const existingItem = await trx<OrderItemModel>('order_items')
         .where({ order_id: orderId, dish_id: dishId })
         .first();
@@ -986,7 +1002,7 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
     const details = await db.transaction(async (trx) => {
       const lockedOrder = await lockOrder(trx, orderId);
       const route = await ensureOrderIsEditable(lockedOrder, trx);
-      const pricingSources = await loadReplacementPricing(trx, orderId, requestedItems);
+      const pricingSources = await loadReplacementPricing(trx, orderId, requestedItems, getBusinessIsoWeekday());
       ensureOrderAcceptanceIsOpen(route);
       const now = new Date();
       await trx('order_items').where({ order_id: orderId }).delete();
@@ -1106,14 +1122,15 @@ export const patchOrderStatus = async (req: AuthRequest, res: Response, next: Ne
         }
       }
 
-      if (order.status === 'paid' && nextStatus === 'cancelled' && order.employee_debt_cents > 0) {
+      const reverseCharges = nextStatus === 'cancelled' && ['paid', 'cooking', 'delivering'].includes(order.status);
+      if (reverseCharges && order.employee_debt_cents > 0) {
         await trx('users').where({ id: order.user_id }).update({
           debt_cents: trx.raw('GREATEST(debt_cents - ?, 0)', [order.employee_debt_cents]),
           updated_at: now,
         });
       }
 
-      if (order.status === 'paid' && nextStatus === 'cancelled' && order.company_paid_cents > 0) {
+      if (reverseCharges && order.company_paid_cents > 0) {
         await trx('companies').where({ id: order.company_id }).update({
           debt_cents: trx.raw('GREATEST(debt_cents - ?, 0)', [order.company_paid_cents]),
           updated_at: now,
