@@ -16,6 +16,7 @@ export interface OrderItemDto {
   discountPriceCents: number;
   discountedQty: number;
   lineTotalCents: number;
+  canIncrease?: boolean;
 }
 
 export interface OrderDto {
@@ -34,6 +35,9 @@ export interface OrderDto {
   createdAt: string;
   updatedAt: string;
   items?: OrderItemDto[];
+  canEdit?: boolean;
+  itemsRevision?: number;
+  orderAcceptanceEndsAt?: string | null;
 }
 
 export interface CreateOrderDto {
@@ -52,6 +56,7 @@ export interface UpsertOrderDishDto {
 
 export interface ReplaceOrderDishesDto {
   items: UpsertOrderDishDto[];
+  expectedItemsRevision?: number;
 }
 
 export interface PatchOrderStatusDto {

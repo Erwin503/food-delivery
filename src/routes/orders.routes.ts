@@ -54,6 +54,9 @@ const router = Router();
  *           type: integer
  *         lineTotalCents:
  *           type: integer
+ *         canIncrease:
+ *           type: boolean
+ *           description: Whether the dish is active and can be increased beyond the existing quantity. Included on order details and dish replacement responses.
  *     Order:
  *       type: object
  *       required:
@@ -104,6 +107,18 @@ const router = Router();
  *         updatedAt:
  *           type: string
  *           format: date-time
+ *         canEdit:
+ *           type: boolean
+ *           description: Whether the authenticated viewer can edit the order at the time of the response. Included on order details and dish replacement responses.
+ *         itemsRevision:
+ *           type: integer
+ *           minimum: 0
+ *           description: Revision to send when replacing the items. Included on order details and dish replacement responses.
+ *         orderAcceptanceEndsAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           description: Acceptance cutoff for the order's route. Included on order details and dish replacement responses.
  *         items:
  *           type: array
  *           items:
@@ -172,6 +187,10 @@ const router = Router();
  *           description: Complete new dish list. Existing order items are fully replaced.
  *           items:
  *             $ref: '#/components/schemas/OrderDishRequest'
+ *         expectedItemsRevision:
+ *           type: integer
+ *           minimum: 0
+ *           description: Present on version-aware clients. A different current revision results in a conflict.
  *     OrderStatusRequest:
  *       type: object
  *       required:
@@ -359,7 +378,7 @@ router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), cr
  * @swagger
  * /orders/{id}:
  *   put:
- *     summary: Update order meta fields
+ *     summary: Update order charges as an administrator
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -382,6 +401,8 @@ router.post('/orders', authenticateToken, checkRole(['employee', 'manager']), cr
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Order'
+ *       403:
+ *         description: Only administrators can change order charges
  *       409:
  *         description: Order cannot be updated in the current status
  */
@@ -446,7 +467,7 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  * /orders/{id}/dishes:
  *   put:
  *     summary: Replace all dishes in an order
- *     description: Accepts the complete new dish list and fully replaces the previous order items. Dish validation, pricing, subscription discounts, order status, and route cutoff restrictions are the same as for order creation.
+ *     description: Accepts the complete dish list and fully replaces the previous items. A removed or deactivated dish can remain up to its existing quantity and keeps its saved pricing. Subscription discounts are recalculated for the new list.
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -474,7 +495,9 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  *       404:
  *         description: Order or dish not found
  *       409:
- *         description: Order status or route cutoff does not allow editing
+ *         description: The supplied revision is stale or the order is no longer editable
+ *       422:
+ *         description: An unavailable dish exceeds the quantity in the existing order
  */
 router.put('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'manager', 'admin']), replaceOrderDishes);
 

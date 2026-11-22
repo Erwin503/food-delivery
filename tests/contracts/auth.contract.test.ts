@@ -16,6 +16,19 @@ test.afterEach(() => {
   releaseDbTestLock();
 });
 
+serialTest('A malformed bearer token has an explicit authentication error code', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/my`, {
+      headers: { Authorization: 'Bearer invalid-token' },
+    });
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { message: 'Invalid token', code: 'INVALID_TOKEN' });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 serialTest('POST /api/auth/signup creates an unverified user and verification code', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -478,13 +491,34 @@ serialTest('POST /api/auth/password/reset/confirm resets the password using a va
   const { server, baseUrl } = await startTestServer();
 
   try {
-    const response = await fetch(`${baseUrl}/api/auth/password/reset/confirm`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'employee.ivanov@cook.local', code: '1112', newPassword: 'Recovered123!' }),
+    const email = 'employee.ivanov@cook.local';
+    const request = (path: string, body: object) => fetch(`${baseUrl}/api/auth/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, ...body }),
     });
+    const profile = (token: string) => fetch(`${baseUrl}/api/auth/profile`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const login = async (deviceId: string) => {
+      const response = await request('login/password', { password: 'Password123!', deviceId });
+      assert.equal(response.status, 200);
+      return (await response.json()).token as string;
+    };
+    const [firstToken, secondToken] = [await login('previous-phone'), await login('previous-tablet')];
+    assert.equal((await profile(firstToken)).status, 200);
+    assert.equal((await profile(secondToken)).status, 200);
 
+    const reset = () => request('password/reset/confirm', {
+      code: '1112', newPassword: 'Recovered123!', deviceId: 'recovery-device',
+    });
+    const response = await reset();
     assert.equal(response.status, 200);
+    const { token } = await response.json();
+    assert.equal((await profile(token)).status, 200);
+    const revoked = await profile(firstToken);
+    assert.equal(revoked.status, 403);
+    assert.equal((await revoked.json()).code, 'SESSION_ENDED');
+    assert.equal((await profile(secondToken)).status, 403);
+    assert.equal((await reset()).status, 401);
   } finally {
     await stopTestServer(server);
   }

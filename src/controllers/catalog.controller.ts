@@ -5,6 +5,7 @@ import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CategoryModel, DishModel, UserModel } from '../models';
 import { buildUploadedFileUrl } from '../middleware/uploadMiddleware';
+import { getBusinessIsoWeekday } from '../utils/businessTime';
 import { toIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
 import { parseRequiredId } from '../utils/requestParams';
@@ -42,7 +43,6 @@ type DishListFilters = {
 const DEFAULT_DISHES_PAGE_SIZE = 20;
 const MAX_DISHES_PAGE_SIZE = 100;
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
-const BUSINESS_TIME_ZONE = process.env.BUSINESS_TIME_ZONE?.trim() || 'Europe/Moscow';
 
 const hasActiveSubscription = (user?: UserSubscriptionRow | null): boolean =>
   Boolean(user?.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now());
@@ -82,23 +82,6 @@ const readAvailableWeekdays = (value: unknown): number[] => {
   }
 };
 
-const getCurrentIsoWeekday = (): number => {
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    timeZone: BUSINESS_TIME_ZONE,
-  }).format(new Date());
-  const weekdayMap: Record<string, number> = {
-    Mon: 1,
-    Tue: 2,
-    Wed: 3,
-    Thu: 4,
-    Fri: 5,
-    Sat: 6,
-    Sun: 7,
-  };
-
-  return weekdayMap[weekday] ?? 1;
-};
 const parsePositiveIntegerQuery = (value: unknown, fieldName: string, defaultValue: number): number => {
   if (value === undefined) {
     return defaultValue;
@@ -177,7 +160,7 @@ const buildDishesListQuery = (filters: DishListFilters, includeUnavailableDishes
   if (!includeUnavailableDishes) {
     query
       .andWhere('d.is_active', true)
-      .andWhereRaw('JSON_CONTAINS(d.available_weekdays, CAST(? AS JSON))', [String(getCurrentIsoWeekday())]);
+      .andWhereRaw('JSON_CONTAINS(d.available_weekdays, CAST(? AS JSON))', [String(getBusinessIsoWeekday())]);
   }
 
   if (filters.query) {
@@ -478,7 +461,7 @@ export const getDishesByCategory = async (req: AuthRequest, res: Response, next:
     if (!includeUnavailableDishes) {
       query
         .andWhere('is_active', true)
-        .andWhereRaw('JSON_CONTAINS(available_weekdays, CAST(? AS JSON))', [String(getCurrentIsoWeekday())]);
+        .andWhereRaw('JSON_CONTAINS(available_weekdays, CAST(? AS JSON))', [String(getBusinessIsoWeekday())]);
     }
 
     const dishes = await query;

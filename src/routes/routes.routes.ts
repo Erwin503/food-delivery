@@ -221,6 +221,8 @@ router.get('/routes/:id', authenticateToken, checkRole(['admin']), getRouteById)
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Route'
+ *       409:
+ *         description: One or more companies are already assigned to another route
  */
 router.post('/routes', authenticateToken, checkRole(['admin']), createRoute);
 
@@ -251,6 +253,8 @@ router.post('/routes', authenticateToken, checkRole(['admin']), createRoute);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Route'
+ *       409:
+ *         description: One or more companies are already assigned to another route
  */
 router.put('/routes/:id', authenticateToken, checkRole(['admin']), updateRoute);
 
@@ -304,7 +308,7 @@ router.get('/routes/:id/companies', authenticateToken, checkRole(['admin']), get
  * @swagger
  * /routes/{id}/companies:
  *   post:
- *     summary: Assign a company to a route, replacing its previous route assignment
+ *     summary: Assign an available company to a route
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -329,6 +333,8 @@ router.get('/routes/:id/companies', authenticateToken, checkRole(['admin']), get
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/RouteCompany'
+ *       409:
+ *         description: The company is already assigned to another route
  */
 router.post('/routes/:id/companies', authenticateToken, checkRole(['admin']), assignRouteCompany);
 

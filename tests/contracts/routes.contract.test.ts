@@ -61,6 +61,7 @@ serialTest('POST /api/routes creates a route for admin', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await db('route_companies').whereIn('company_id', [1, 2]).delete();
     const departureAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
     const orderAcceptanceEndsAt = new Date(Date.now() + 46 * 60 * 60 * 1000).toISOString();
 
@@ -95,6 +96,7 @@ serialTest('PUT /api/routes/:id updates route fields', async () => {
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await db('routes').where({ id: 3 }).update({ deleted_at: new Date() });
     const departureAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     const orderAcceptanceEndsAt = new Date(Date.now() + 70 * 60 * 60 * 1000).toISOString();
 
@@ -213,6 +215,7 @@ serialTest('POST /api/routes/:id/companies assigns a company to a route', async 
   const { server, baseUrl } = await startTestServer();
 
   try {
+    await db('route_companies').where({ company_id: 3 }).delete();
     const response = await fetch(`${baseUrl}/api/routes/1/companies`, {
       method: 'POST',
       headers: {
@@ -227,6 +230,53 @@ serialTest('POST /api/routes/:id/companies assigns a company to a route', async 
     assert.equal(payload.some((item: { id: number }) => item.id === 3), true);
     const assignments = await db('route_companies').where({ company_id: 3 });
     assert.deepEqual(assignments.map((row) => row.route_id), [1]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Every route write rejects a company assigned to another active route', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const assignments = () => db('route_companies').select('company_id', 'route_id').orderBy('company_id');
+    const before = await assignments();
+    const headers = { Authorization: `Bearer ${adminToken()}`, 'Content-Type': 'application/json' };
+    const requests = [
+      ['POST', '/routes', {
+        name: 'Conflicting delivery',
+        departureAt: new Date(Date.now() + 72 * 3600_000).toISOString(),
+        orderAcceptanceEndsAt: new Date(Date.now() + 70 * 3600_000).toISOString(),
+        companyIds: [1],
+      }],
+      ['PUT', '/routes/1', { name: 'Conflicting update', companyIds: [1, 2] }],
+      ['POST', '/routes/1/companies', { companyId: 1 }],
+    ] as const;
+    for (const [method, path, body] of requests) {
+      const response = await fetch(`${baseUrl}/api${path}`, { method, headers, body: JSON.stringify(body) });
+      assert.equal(response.status, 409);
+      assert.deepEqual(await assignments(), before);
+    }
+    const routes = await db('routes').select('name');
+    assert.equal(routes.length, 3);
+    assert.ok(routes.every((route) => !route.name.startsWith('Conflicting')));
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Concurrent route assignments leave one winner and one conflict', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    await db('route_companies').where({ company_id: 3 }).delete();
+    const responses = await Promise.all([1, 2].map(routeId => fetch(`${baseUrl}/api/routes/${routeId}/companies`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyId: 3 }),
+    })));
+    assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+    const assignments = await db('route_companies').where({ company_id: 3 });
+    assert.equal(assignments.length, 1);
+    assert.equal(assignments[0].route_id, responses[0].status === 200 ? 1 : 2);
   } finally {
     await stopTestServer(server);
   }

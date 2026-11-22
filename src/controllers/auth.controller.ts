@@ -81,6 +81,16 @@ const issueAuthResponse = async (
   let sessionId: number;
 
   try {
+    const currentUser = await trx<UserModel>('users')
+      .select('password_hash')
+      .where({ id: user.id })
+      .whereNull('deleted_at')
+      .forUpdate()
+      .first();
+    if (!currentUser || currentUser.password_hash !== user.password_hash) {
+      throw new AppError('Credentials changed, please sign in again', 401);
+    }
+
     if (deviceId) {
       await trx('auth_sessions').where({ device_id: deviceId }).del();
     }
@@ -563,15 +573,26 @@ export const confirmPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('User not found', 404);
     }
 
+    const firebaseToken = normalizeFirebaseToken(req.body.firebaseToken);
+    const deviceId = normalizeDeviceId(req.body.deviceId);
+    const passwordHash = await hashPassword(newPassword);
     await db.transaction(async (trx) => {
-      await trx('auth_password_reset_codes').where({ id: resetCode.id }).update({
-        consumed_at: new Date(),
-      });
-
-      await trx('users').where({ id: user.id }).update({
-        password_hash: await hashPassword(newPassword),
-        updated_at: new Date(),
-      });
+      const activeUser = await trx('users').where({ id: user.id }).whereNull('deleted_at').forUpdate().first('id');
+      if (!activeUser) {
+        throw new AppError('User not found', 404);
+      }
+      const now = new Date();
+      const consumed = await trx('auth_password_reset_codes')
+        .where({ id: resetCode.id, email })
+        .whereNull('consumed_at')
+        .where('expires_at', '>=', now)
+        .update({ consumed_at: now });
+      if (!consumed) {
+        throw new AppError('Invalid or expired reset code', 401);
+      }
+      await trx('auth_password_reset_codes').where({ email }).whereNull('consumed_at').update({ consumed_at: now });
+      await trx('users').where({ id: user.id }).update({ password_hash: passwordHash, updated_at: now });
+      await trx('auth_sessions').where({ user_id: user.id }).delete();
     });
 
     const updatedUser = await loadUserById(user.id);
@@ -580,7 +601,7 @@ export const confirmPasswordReset = async (req: Request, res: Response, next: Ne
       throw new AppError('User not found', 404);
     }
 
-    await issueAuthResponse(res, updatedUser, req.body.firebaseToken, req.body.deviceId);
+    await issueAuthResponse(res, updatedUser, firebaseToken, deviceId);
   } catch (error) {
     next(error);
   }

@@ -14,5 +14,6 @@ export interface OrderModel extends SoftDeleteColumns {
   total_cents: number;
   company_paid_cents: number;
   employee_debt_cents: number;
+  items_revision: number;
   cancelled_at: Date | string | null;
 }

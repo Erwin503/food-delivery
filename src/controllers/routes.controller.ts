@@ -89,11 +89,10 @@ const replaceRouteCompanies = async (
   companyIds: number[],
   clearCurrentRoute: boolean
 ): Promise<void> => {
-  if (clearCurrentRoute) {
-    await trx('route_companies').where({ route_id: routeId }).delete();
-  }
-
   if (companyIds.length === 0) {
+    if (clearCurrentRoute) {
+      await trx('route_companies').where({ route_id: routeId }).delete();
+    }
     return;
   }
 
@@ -101,30 +100,50 @@ const replaceRouteCompanies = async (
     .select('id')
     .whereIn('id', companyIds)
     .whereNull('deleted_at')
+    .orderBy('id')
     .forUpdate();
 
   if (companies.length !== companyIds.length) {
-    throw new AppError('One or more companies were not found', 404);
+    throw new AppError('Company not found', 404);
   }
 
-  await trx('route_companies').whereIn('company_id', companyIds).delete();
-  await trx('route_companies').insert(
-    companyIds.map((companyId) => ({
+  const assignments = await trx('route_companies as rc')
+    .join('routes as r', 'r.id', 'rc.route_id')
+    .whereIn('rc.company_id', companyIds)
+    .select('rc.company_id', 'rc.route_id', 'r.deleted_at as route_deleted_at');
+  if (assignments.some((assignment) => assignment.route_id !== routeId && !assignment.route_deleted_at)) {
+    throw new AppError('One or more companies are already assigned to another route', 409);
+  }
+
+  if (clearCurrentRoute) {
+    await trx('route_companies').where({ route_id: routeId }).whereNotIn('company_id', companyIds).delete();
+  }
+  const archivedCompanyIds = assignments.filter((assignment) => assignment.route_deleted_at)
+    .map((assignment) => assignment.company_id);
+  if (archivedCompanyIds.length > 0) {
+    await trx('route_companies').whereIn('company_id', archivedCompanyIds).delete();
+  }
+  const assignedHere = new Set(assignments.filter((assignment) => assignment.route_id === routeId)
+    .map((assignment) => assignment.company_id));
+  const newCompanyIds = companyIds.filter((companyId) => !assignedHere.has(companyId));
+  if (newCompanyIds.length > 0) {
+    await trx('route_companies').insert(newCompanyIds.map((companyId) => ({
       route_id: routeId,
       company_id: companyId,
       created_at: new Date(),
-    }))
-  );
+    })));
+  }
 };
 
-const requireRoute = async (id: number): Promise<RouteModel> =>
+const requireRoute = async (id: number, trx?: Knex.Transaction): Promise<RouteModel> =>
   requireEntity(
-    () =>
-      db<RouteModel>('routes')
+    () => {
+      const query = (trx ?? db)<RouteModel>('routes')
         .select(...routeColumns)
         .where({ id })
-        .whereNull('deleted_at')
-        .first(),
+        .whereNull('deleted_at');
+      return (trx ? query.forUpdate() : query).first();
+    },
     'Route not found'
   );
 
@@ -241,22 +260,12 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     await requireAuthenticatedUser(req.user);
     const routeId = parseRequiredId(req.params.id, 'Route id');
 
-    await requireRoute(routeId);
-
     const patch: Record<string, unknown> = {
       updated_at: new Date(),
     };
 
     const departureAt = req.body.departureAt;
     const orderAcceptanceEndsAt = req.body.orderAcceptanceEndsAt;
-
-    if (!isOmittedValue(departureAt) || !isOmittedValue(orderAcceptanceEndsAt)) {
-      const current = await requireRoute(routeId);
-      validateRouteTimes(
-        String(isOmittedValue(departureAt) ? current.departure_at : departureAt),
-        String(isOmittedValue(orderAcceptanceEndsAt) ? current.order_acceptance_ends_at : orderAcceptanceEndsAt)
-      );
-    }
 
     if (!isOmittedValue(req.body.name)) {
       patch.name = req.body.name;
@@ -272,6 +281,13 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     await db.transaction(async (trx) => {
+      const current = await requireRoute(routeId, trx);
+      if (!isOmittedValue(departureAt) || !isOmittedValue(orderAcceptanceEndsAt)) {
+        validateRouteTimes(
+          String(isOmittedValue(departureAt) ? current.departure_at : departureAt),
+          String(isOmittedValue(orderAcceptanceEndsAt) ? current.order_acceptance_ends_at : orderAcceptanceEndsAt)
+        );
+      }
       await trx('routes').where({ id: routeId }).update(patch);
 
       if (!isOmittedValue(req.body.companyIds)) {
@@ -322,32 +338,11 @@ export const assignRouteCompany = async (req: AuthRequest, res: Response, next: 
   try {
     await requireAuthenticatedUser(req.user);
     const routeId = parseRequiredId(req.params.id, 'Route id');
-    const companyId = Number(req.body.companyId);
-
-    if (!companyId) {
-      throw new AppError('Route id and companyId are required', 400);
-    }
-
-    await requireRoute(routeId);
-
-    const company = await db<CompanyModel>('companies')
-      .select('id', 'name')
-      .where({ id: companyId })
-      .whereNull('deleted_at')
-      .first();
-
-    if (!company) {
-      throw new AppError('Company not found', 404);
-    }
+    const companyId = parseRequiredId(req.body.companyId, 'Company id');
 
     await db.transaction(async (trx) => {
-      await trx('companies').where({ id: companyId }).forUpdate().first();
-      await trx('route_companies').where({ company_id: companyId }).delete();
-      await trx('route_companies').insert({
-        route_id: routeId,
-        company_id: companyId,
-        created_at: new Date(),
-      });
+      await requireRoute(routeId, trx);
+      await replaceRouteCompanies(trx, routeId, [companyId], false);
     });
 
     const companies = await loadRouteCompanies(routeId);
@@ -363,8 +358,11 @@ export const removeRouteCompany = async (req: AuthRequest, res: Response, next: 
     const routeId = parseRequiredId(req.params.id, 'Route id');
     const companyId = parseRequiredId(req.params.companyId, 'Company id');
 
-    await requireRoute(routeId);
-    await db('route_companies').where({ route_id: routeId, company_id: companyId }).delete();
+    await db.transaction(async (trx) => {
+      await requireRoute(routeId, trx);
+      await trx('companies').where({ id: companyId }).forUpdate().first();
+      await trx('route_companies').where({ route_id: routeId, company_id: companyId }).delete();
+    });
     res.status(204).send();
   } catch (error) {
     next(error);

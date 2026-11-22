@@ -28,9 +28,19 @@ export const authenticateToken = async (
     return;
   }
 
+  let user: AuthTokenPayload;
   try {
-    const user = jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
+    user = jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
+  } catch (error) {
+    if (!(error instanceof jwt.JsonWebTokenError)) {
+      next(error);
+      return;
+    }
+    res.status(403).json({ message: 'Invalid token', code: 'INVALID_TOKEN' });
+    return;
+  }
 
+  try {
     const currentUser = await db('users')
       .select('id', 'email', 'role', 'company_id', 'deleted_at')
       .where({ id: user.id })
@@ -49,7 +59,7 @@ export const authenticateToken = async (
         .first();
 
       if (!session) {
-        res.status(403).json({ message: 'Session has ended' });
+        res.status(403).json({ message: 'Session has ended', code: 'SESSION_ENDED' });
         return;
       }
     }
@@ -64,6 +74,6 @@ export const authenticateToken = async (
     next();
   } catch (error) {
     logger.error(error);
-    res.status(403).json({ message: 'Invalid token' });
+    next(error);
   }
 };

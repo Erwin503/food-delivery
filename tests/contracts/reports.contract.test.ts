@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
+import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay } from '../../src/utils/businessTime';
 import { generateToken } from '../../src/utils/generateToken';
 import { extractPdfText, findZipEntries, normalizePdfText } from '../helpers/report-file-utils';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
@@ -18,6 +19,10 @@ const managerToken = () =>
 const assertPdfResponse = async (response: Response): Promise<Buffer> => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/pdf');
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.match(response.headers.get('x-report-day') ?? '', /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(response.headers.get('x-report-valid-for-ms') ?? '', /^\d+$/);
+  assert.match(response.headers.get('access-control-expose-headers') ?? '', /X-Report-Day.*X-Report-Valid-For-Ms/i);
 
   const body = Buffer.from(await response.arrayBuffer());
   assert.equal(body.subarray(0, 4).toString('ascii'), '%PDF');
@@ -26,33 +31,16 @@ const assertPdfResponse = async (response: Response): Promise<Buffer> => {
 };
 
 const setRoutesToToday = async () => {
-  const now = new Date();
-
-  const route1Departure = new Date(now);
-  route1Departure.setHours(10, 0, 0, 0);
-  const route1Cutoff = new Date(route1Departure.getTime() - 2 * 60 * 60 * 1000);
-
-  const route2Departure = new Date(now);
-  route2Departure.setHours(13, 0, 0, 0);
-  const route2Cutoff = new Date(route2Departure.getTime() - 2 * 60 * 60 * 1000);
-
-  const route3Departure = new Date(now);
-  route3Departure.setDate(route3Departure.getDate() - 1);
-  route3Departure.setHours(13, 0, 0, 0);
-  const route3Cutoff = new Date(route3Departure.getTime() - 2 * 60 * 60 * 1000);
-
-  await db('routes').where({ id: 1 }).update({
-    departure_at: route1Departure,
-    order_acceptance_ends_at: route1Cutoff,
+  const today = getBusinessDay();
+  const yesterday = getBusinessDay(new Date(today.start.getTime() - 1));
+  const routeTimes = (day: BusinessDay, hours: number) => ({
+    departure_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + hours * 3600]),
+    order_acceptance_ends_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + (hours - 2) * 3600]),
   });
-  await db('routes').where({ id: 2 }).update({
-    departure_at: route2Departure,
-    order_acceptance_ends_at: route2Cutoff,
-  });
-  await db('routes').where({ id: 3 }).update({
-    departure_at: route3Departure,
-    order_acceptance_ends_at: route3Cutoff,
-  });
+
+  await db('routes').where({ id: 1 }).update(routeTimes(today, 10));
+  await db('routes').where({ id: 2 }).update(routeTimes(today, 13));
+  await db('routes').where({ id: 3 }).update(routeTimes(yesterday, 13));
 };
 
 test.beforeEach(async () => {
@@ -117,6 +105,96 @@ serialTest('GET /api/reports/labels/today.pdf возвращает PDF с нак
   }
 });
 
+serialTest('Отмена исключает заказ из сводки кухни и наклеек, сохраняя его в реестре', async () => {
+  const { server, baseUrl } = await startTestServer();
+  const reportRows: Array<Array<{ order_id?: number; dish_name?: string; total_qty?: number }>> = [];
+  const recordRows = (rows: typeof reportRows[number], { sql }: { sql: string }) => {
+    if (sql.includes('`orders` as `o`')) reportRows.push(rows);
+  };
+
+  try {
+    await db('orders').where({ id: 1 }).update({ status: 'cancelled', cancelled_at: new Date() });
+    db.on('query-response', recordRows);
+    for (const name of ['orders', 'dishes', 'labels']) {
+      await assertPdfResponse(await fetch(`${baseUrl}/api/reports/${name}/today.pdf`, {
+        headers: { Authorization: `Bearer ${adminToken()}` },
+      }));
+    }
+    assert.ok(reportRows[0].some((row) => row.order_id === 1));
+    assert.equal(reportRows[1].find((row) => row.dish_name === 'Маргарита'), undefined);
+    assert.equal(Number(reportRows[1].find((row) => row.dish_name === 'Пепперони')?.total_qty), 1);
+    assert.deepEqual([...new Set(reportRows[2].map((row) => row.order_id))], [2]);
+  } finally {
+    db.off('query-response', recordRows);
+    await stopTestServer(server);
+  }
+});
+
+test('Дневной отчёт сохраняет дату выборки при переходе через московскую полночь', {
+  concurrency: false,
+  skip: BUSINESS_TIME_ZONE !== 'Europe/Moscow',
+}, async () => {
+  const { server, baseUrl } = await startTestServer();
+  const originalNow = Date.now;
+  const previousDay = '2026-11-20';
+  const nextDay = '2026-11-21';
+  const previousStart = Date.parse('2026-11-19T21:00:00Z');
+  const midnight = Date.parse('2026-11-20T21:00:00Z');
+  const nextEnd = Date.parse('2026-11-21T21:00:00Z');
+  let now = midnight - 1;
+  const ranges: number[][] = [];
+  const moveClockDuringQuery = ({ sql, bindings }: { sql: string; bindings: number[] }) => {
+    if (sql.includes('`orders` as `o`') && sql.includes('`r`.`departure_at`')) {
+      ranges.push(bindings.map((seconds) => seconds * 1000));
+      now = midnight;
+    }
+  };
+
+  try {
+    Date.now = () => now;
+    const headers = { Authorization: `Bearer ${adminToken()}` };
+    const reportUrl = `${baseUrl}/api/reports/orders/today.pdf`;
+    const before = await fetch(reportUrl, { headers });
+    await assertPdfResponse(before);
+    assert.equal(before.headers.get('x-report-day'), previousDay);
+    assert.equal(before.headers.get('x-report-valid-for-ms'), '1');
+
+    db.on('query', moveClockDuringQuery);
+    const crossing = await fetch(reportUrl, { headers });
+    await assertPdfResponse(crossing);
+    assert.equal(crossing.headers.get('x-report-day'), previousDay);
+    assert.equal(crossing.headers.get('x-report-valid-for-ms'), '0');
+
+    const after = await fetch(reportUrl, { headers });
+    await assertPdfResponse(after);
+    assert.equal(after.headers.get('x-report-day'), nextDay);
+    assert.ok(Number(after.headers.get('x-report-valid-for-ms')) > 0);
+    assert.deepEqual(ranges, [
+      [previousStart, midnight],
+      [midnight, nextEnd],
+    ]);
+  } finally {
+    db.off('query', moveClockDuringQuery);
+    Date.now = originalNow;
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Бизнес-день учитывает перевод часов и пропущенную полночь', () => {
+  const spring = getBusinessDay(new Date('2026-03-08T12:00:00Z'), 'America/New_York');
+  assert.equal(spring.start.toISOString(), '2026-03-08T05:00:00.000Z');
+  assert.equal(spring.end.toISOString(), '2026-03-09T04:00:00.000Z');
+
+  const autumn = getBusinessDay(new Date('2026-11-01T12:00:00Z'), 'America/New_York');
+  assert.equal(autumn.start.toISOString(), '2026-11-01T04:00:00.000Z');
+  assert.equal(autumn.end.toISOString(), '2026-11-02T05:00:00.000Z');
+
+  const skippedMidnight = getBusinessDay(new Date('2018-11-04T12:00:00Z'), 'America/Sao_Paulo');
+  assert.equal(skippedMidnight.day, '2018-11-04');
+  assert.equal(skippedMidnight.start.toISOString(), '2018-11-04T03:00:00.000Z');
+  assert.equal(skippedMidnight.end.toISOString(), '2018-11-05T02:00:00.000Z');
+});
+
 serialTest('эндпоинты отчётов запрещены для не-администраторов', async () => {
   const { server, baseUrl } = await startTestServer();
 
@@ -131,16 +209,26 @@ serialTest('эндпоинты отчётов запрещены для не-а�
   }
 });
 
-serialTest('POST /api/reports/test-run/today создаёт временные заказы, возвращает zip с PDF и очищает данные', async () => {
+serialTest('POST /api/reports/test-run/today возвращает демонстрационный архив без изменений в БД', async () => {
   const { server, baseUrl } = await startTestServer();
+  const writes: string[] = [];
+  const recordWrites = ({ sql }: { sql: string }) => {
+    if (/^\s*(insert|update|delete)\b/i.test(sql)) writes.push(sql);
+  };
 
   try {
-    const response = await fetch(`${baseUrl}/api/reports/test-run/today`, {
+    await db('orders').where({ id: 1 }).update({ user_id: 2, order_day: getBusinessDay().day });
+    const before = await db('orders').where({ id: 1 }).first();
+    db.on('query', recordWrites);
+    const download = () => fetch(`${baseUrl}/api/reports/test-run/today`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminToken()}` },
     });
+    const [response, concurrent] = await Promise.all([download(), download()]);
 
     assert.equal(response.status, 200);
+    assert.equal(concurrent.status, 200);
+    await concurrent.arrayBuffer();
     assert.equal(response.headers.get('content-type'), 'application/zip');
 
     const zipBuffer = Buffer.from(await response.arrayBuffer());
@@ -161,12 +249,10 @@ serialTest('POST /api/reports/test-run/today создаёт временные �
     const labelsBody = normalizePdfText(extractPdfText(labelsPdf.content));
     assert.match(labelsBody, /Наклей/);
 
-    const leftoverOrders = await db('orders').where('order_number', 'like', 'TEST-RPT-%');
-    const leftoverRoutes = await db('routes').where('name', 'like', 'Тестовый рейс отчётов TEST-RPT-%');
-
-    assert.equal(leftoverOrders.length, 0);
-    assert.equal(leftoverRoutes.length, 0);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(await db('orders').where({ id: 1 }).first(), before);
   } finally {
+    db.off('query', recordWrites);
     await stopTestServer(server);
   }
 });

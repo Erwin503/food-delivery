@@ -42,9 +42,12 @@ services:
         condition: service_healthy
     ports:
       - "${PORT:-3000}:3000"
+    volumes:
+      - uploads_data:/app/uploads
     command: >
       sh -c "npx knex migrate:latest &&
              node dist/src/index.js"
 
 volumes:
   db_data:
+  uploads_data:
