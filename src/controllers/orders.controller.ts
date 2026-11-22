@@ -36,6 +36,7 @@ const orderColumns = [
   'total_cents',
   'company_paid_cents',
   'employee_debt_cents',
+  'items_revision',
   'created_at',
   'updated_at',
   'deleted_at',
@@ -492,6 +493,7 @@ const toOrderDetailsDto = (
   const weekday = getBusinessIsoWeekday();
   return {
     ...toOrderDto(order),
+    itemsRevision: order.items_revision,
     items: items.map((item) => ({
       ...toOrderItemDto(item),
       canIncrease: Boolean(item.dish_is_active) && !item.dish_deleted_at &&
@@ -518,7 +520,7 @@ const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction):
   return route;
 };
 
-const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<void> => {
+const recalculateOrderTotals = async (trx: typeof db, orderId: number, itemsChanged = false): Promise<void> => {
   const order = await trx<OrderModel>('orders').select(...orderColumns).where({ id: orderId }).first();
 
   if (!order) {
@@ -586,6 +588,7 @@ const recalculateOrderTotals = async (trx: typeof db, orderId: number): Promise<
     total_cents: totalCents,
     company_paid_cents: billing.companyPaidCents,
     employee_debt_cents: billing.employeeDebtCents,
+    ...(itemsChanged ? { items_revision: order.items_revision + 1 } : {}),
     updated_at: new Date(),
   });
 };
@@ -751,8 +754,8 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       if (!await loadCompany(companyId, trx)) {
         throw new AppError('Company not found', 404);
       }
-      const route = await getAvailableRouteForCompany(companyId, now, trx);
-      if (!route) {
+      const availableRoute = await getAvailableRouteForCompany(companyId, now, trx);
+      if (!availableRoute) {
         throw new AppError('No active route is available for this company', 409);
       }
 
@@ -773,6 +776,15 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         await trx('orders').where({ id: staleOrder.id }).update({ order_day: null });
       }
 
+      const route = await selectOrderRoute(availableRoute.id, trx).forShare().first();
+      const assignment = route && await trx('route_companies')
+        .select('company_id')
+        .where({ route_id: route.id, company_id: companyId })
+        .forShare()
+        .first();
+      if (!route || !assignment || new Date(route.departure_at).getTime() <= Date.now()) {
+        throw new AppError('No active route is available for this company', 409);
+      }
       ensureOrderAcceptanceIsOpen(route);
       const result = await trx('orders').insert({
         user_id: user.id,
@@ -979,7 +991,7 @@ export const addOrderDish = async (req: AuthRequest, res: Response, next: NextFu
         });
       }
 
-      await recalculateOrderTotals(trx, orderId);
+      await recalculateOrderTotals(trx, orderId, true);
     });
 
     const updatedOrder = await requireOrder(orderId);
@@ -994,6 +1006,13 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
   try {
     const orderId = parseRequiredId(req.params.id, 'Order id');
     const requestedItems = parseCreateOrderItems(req.body.items);
+    const expectedRevision = req.body.expectedItemsRevision;
+    if (
+      expectedRevision !== undefined &&
+      (!Number.isInteger(expectedRevision) || expectedRevision < 0 || expectedRevision > 0xffffffff)
+    ) {
+      throw new AppError('expectedItemsRevision must be a non-negative integer', 400);
+    }
 
     const order = await requireOrder(orderId);
     const editor = await requireOrderEditor(req, order);
@@ -1002,6 +1021,9 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
     const details = await db.transaction(async (trx) => {
       const lockedOrder = await lockOrder(trx, orderId);
       const route = await ensureOrderIsEditable(lockedOrder, trx);
+      if (expectedRevision !== undefined && expectedRevision !== lockedOrder.items_revision) {
+        throw new AppError('Order items have changed since it was opened', 409);
+      }
       const pricingSources = await loadReplacementPricing(trx, orderId, requestedItems, getBusinessIsoWeekday());
       ensureOrderAcceptanceIsOpen(route);
       const now = new Date();
@@ -1023,7 +1045,7 @@ export const replaceOrderDishes = async (req: AuthRequest, res: Response, next: 
         }))
       );
 
-      await recalculateOrderTotals(trx, orderId);
+      await recalculateOrderTotals(trx, orderId, true);
       const updatedOrder = await lockOrder(trx, orderId);
       const items = await loadOrderItems(orderId, trx);
       return toOrderDetailsDto(updatedOrder, items, editor, route);
@@ -1052,7 +1074,7 @@ export const removeOrderDish = async (req: AuthRequest, res: Response, next: Nex
         throw new AppError('Order item not found', 404);
       }
 
-      await recalculateOrderTotals(trx, orderId);
+      await recalculateOrderTotals(trx, orderId, true);
     });
 
     res.status(204).send();

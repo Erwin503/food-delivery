@@ -110,6 +110,10 @@ const router = Router();
  *         canEdit:
  *           type: boolean
  *           description: Whether the authenticated viewer can edit the order at the time of the response. Included on order details and dish replacement responses.
+ *         itemsRevision:
+ *           type: integer
+ *           minimum: 0
+ *           description: Revision to send when replacing the items. Included on order details and dish replacement responses.
  *         orderAcceptanceEndsAt:
  *           type: string
  *           format: date-time
@@ -183,6 +187,10 @@ const router = Router();
  *           description: Complete new dish list. Existing order items are fully replaced.
  *           items:
  *             $ref: '#/components/schemas/OrderDishRequest'
+ *         expectedItemsRevision:
+ *           type: integer
+ *           minimum: 0
+ *           description: Present on version-aware clients. A different current revision results in a conflict.
  *     OrderStatusRequest:
  *       type: object
  *       required:
@@ -487,7 +495,7 @@ router.post('/orders/:id/dishes', authenticateToken, checkRole(['employee', 'man
  *       404:
  *         description: Order or dish not found
  *       409:
- *         description: Order status or route cutoff does not allow editing
+ *         description: The supplied revision is stale or the order is no longer editable
  *       422:
  *         description: An unavailable dish exceeds the quantity in the existing order
  */

@@ -36,6 +36,7 @@ export interface OrderDto {
   updatedAt: string;
   items?: OrderItemDto[];
   canEdit?: boolean;
+  itemsRevision?: number;
   orderAcceptanceEndsAt?: string | null;
 }
 
@@ -55,6 +56,7 @@ export interface UpsertOrderDishDto {
 
 export interface ReplaceOrderDishesDto {
   items: UpsertOrderDishDto[];
+  expectedItemsRevision?: number;
 }
 
 export interface PatchOrderStatusDto {

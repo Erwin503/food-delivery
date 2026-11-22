@@ -474,11 +474,85 @@ serialTest('PUT /api/orders/:id/dishes fully replaces order items', async () => 
     assert.equal(payload.items[0].lineTotalCents, 27800);
     assert.equal(payload.canEdit, true);
     assert.ok(payload.orderAcceptanceEndsAt);
+    assert.equal(payload.itemsRevision, 1);
 
     const storedItems = await db('order_items').where({ order_id: 1 });
     assert.equal(storedItems.length, 1);
     assert.equal(storedItems[0].dish_id, 4);
   } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Two editors cannot replace items from the same revision', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const headers = {
+      Authorization: `Bearer ${employeeToken()}`,
+      'Content-Type': 'application/json',
+    };
+    const details = () => fetch(`${baseUrl}/api/orders/1`, { headers }).then((response) => response.json());
+    const before = await details();
+    assert.equal(before.itemsRevision, 0);
+    const replace = (dishId: number, expectedItemsRevision: number) =>
+      fetch(`${baseUrl}/api/orders/1/dishes`, {
+        method: 'PUT', headers,
+        body: JSON.stringify({ items: [{ dishId, qty: 1 }], expectedItemsRevision }),
+      });
+    const responses = await Promise.all([replace(1, before.itemsRevision), replace(4, before.itemsRevision)]);
+    assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
+    const winner = await responses.find((response) => response.status === 200)!.json();
+    const loser = await responses.find((response) => response.status === 409)!.json();
+    assert.equal(winner.itemsRevision, 1);
+    assert.equal(loser.message, 'Order items have changed since it was opened');
+    assert.deepEqual((await details()).items, winner.items);
+    const retry = await replace(2, (await details()).itemsRevision);
+    assert.equal(retry.status, 200);
+    assert.equal((await retry.json()).itemsRevision, 2);
+    assert.equal((await db('orders').where({ user_id: 4 }).count({ count: 'id' }).first())?.count, 1);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Order creation checks a cutoff changed by a concurrent route update', async () => {
+  await moveOrderToPreviousDay();
+  const { server, baseUrl } = await startTestServer();
+  const routeUpdate = await db.transaction();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onQuery: ((query: { sql: string }) => void) | undefined;
+  let creation: Promise<Response> | undefined;
+  try {
+    const order = await db('orders').where({ id: 1 }).first('route_id');
+    await routeUpdate('routes').where({ id: order.route_id }).update({
+      order_acceptance_ends_at: new Date(Date.now() - 60_000),
+    });
+    const reachedWrite = new Promise<void>((resolve, reject) => {
+      onQuery = ({ sql }) => {
+        if (/from `routes`.*lock in share mode|insert into `orders`/.test(sql)) {
+          resolve();
+        }
+      };
+      db.on('query', onQuery);
+      timeout = setTimeout(() => reject(new Error('Order did not reach its final route check')), 5_000);
+    });
+    creation = fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${employeeToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ dishId: 1, qty: 1 }] }),
+    });
+    await Promise.race([reachedWrite, creation.then(() => {})]);
+    await routeUpdate.commit();
+
+    const response = await creation;
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).message, 'Order acceptance time has ended for this route');
+    assert.equal((await db('orders').where({ user_id: 4 }).count({ count: 'id' }).first())?.count, 1);
+  } finally {
+    clearTimeout(timeout);
+    if (onQuery) db.removeListener('query', onQuery);
+    if (!routeUpdate.isCompleted()) await routeUpdate.rollback();
+    await creation?.catch(() => {});
     await stopTestServer(server);
   }
 });
