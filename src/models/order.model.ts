@@ -7,6 +7,8 @@ export interface OrderModel extends SoftDeleteColumns {
   user_id: number;
   company_id: number;
   route_id: number;
+  route_departure_unix: number | string;
+  route_acceptance_ends_unix: number | string;
   status: OrderStatusModel;
   subtotal_cents: number;
   delivery_fee_cents: number;

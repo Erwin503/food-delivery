@@ -30,22 +30,22 @@ const assertPdfResponse = async (response: Response): Promise<Buffer> => {
   return body;
 };
 
-const setRoutesToToday = async () => {
+const setOrderDepartures = async () => {
   const today = getBusinessDay();
   const yesterday = getBusinessDay(new Date(today.start.getTime() - 1));
   const routeTimes = (day: BusinessDay, hours: number) => ({
-    departure_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + hours * 3600]),
-    order_acceptance_ends_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + (hours - 2) * 3600]),
+    route_departure_unix: day.start.getTime() / 1000 + hours * 3600,
+    route_acceptance_ends_unix: day.start.getTime() / 1000 + (hours - 2) * 3600,
   });
 
-  await db('routes').where({ id: 1 }).update(routeTimes(today, 10));
-  await db('routes').where({ id: 2 }).update(routeTimes(today, 13));
-  await db('routes').where({ id: 3 }).update(routeTimes(yesterday, 13));
+  await db('orders').where({ id: 1 }).update(routeTimes(today, 13));
+  await db('orders').where({ id: 2 }).update(routeTimes(today, 10));
+  await db('orders').where({ id: 3 }).update(routeTimes(yesterday, 13));
 };
 
 test.beforeEach(async () => {
   await lockAndSeedDb(db);
-  await setRoutesToToday();
+  await setOrderDepartures();
 });
 
 test.afterEach(() => {
@@ -144,7 +144,7 @@ test('Дневной отчёт сохраняет дату выборки пр�
   let now = midnight - 1;
   const ranges: number[][] = [];
   const moveClockDuringQuery = ({ sql, bindings }: { sql: string; bindings: number[] }) => {
-    if (sql.includes('`orders` as `o`') && sql.includes('`r`.`departure_at`')) {
+    if (sql.includes('`orders` as `o`') && sql.includes('`o`.`route_departure_unix`')) {
       ranges.push(bindings.map((seconds) => seconds * 1000));
       now = midnight;
     }
@@ -253,6 +253,44 @@ serialTest('POST /api/reports/test-run/today возвращает демонст
     assert.deepEqual(await db('orders').where({ id: 1 }).first(), before);
   } finally {
     db.off('query', recordWrites);
+    await stopTestServer(server);
+  }
+});
+
+serialTest('Отчёты за день используют сохранённое отправление заказа регулярного рейса', async () => {
+  const { server, baseUrl } = await startTestServer();
+  const reportRows: Array<Array<{ order_id?: number; departure_at?: number | string }>> = [];
+  const recordRows = (rows: typeof reportRows[number], { sql }: { sql: string }) => {
+    if (sql.includes('`orders` as `o`')) reportRows.push(rows);
+  };
+
+  try {
+    const day = getBusinessDay();
+    const todayDeparture = day.start.getTime() / 1000 + 12 * 3600;
+    const futureDeparture = day.end.getTime() / 1000 + 12 * 3600;
+    await db('orders').where({ id: 1 }).update({
+      route_departure_unix: futureDeparture,
+      route_acceptance_ends_unix: futureDeparture - 3600,
+    });
+    await db('orders').where({ id: 3 }).update({
+      route_departure_unix: todayDeparture,
+      route_acceptance_ends_unix: todayDeparture - 3600,
+    });
+
+    db.on('query-response', recordRows);
+    for (const name of ['orders', 'labels']) {
+      await assertPdfResponse(await fetch(`${baseUrl}/api/reports/${name}/today.pdf`, {
+        headers: { Authorization: `Bearer ${adminToken()}` },
+      }));
+    }
+
+    assert.equal(reportRows.length, 2);
+    for (const rows of reportRows) {
+      assert.deepEqual([...new Set(rows.map((row) => row.order_id))], [2, 3]);
+      assert.equal(Number(rows.find((row) => row.order_id === 3)?.departure_at), todayDeparture);
+    }
+  } finally {
+    db.off('query-response', recordRows);
     await stopTestServer(server);
   }
 });

@@ -18,6 +18,7 @@ import { toNullableIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
 import { calculateOrderBilling } from '../utils/orderBilling';
 import { parseRequiredId } from '../utils/requestParams';
+import { getNextOrderableRoute, readRouteSchedule, RouteTimes } from '../utils/routeSchedule';
 import {
   requireAuthenticatedUser,
   USER_COLUMNS,
@@ -29,6 +30,8 @@ const orderColumns = [
   'user_id',
   'company_id',
   'route_id',
+  'route_departure_unix',
+  'route_acceptance_ends_unix',
   'status',
   'subtotal_cents',
   'delivery_fee_cents',
@@ -58,16 +61,7 @@ const dishColumns = [
   'deleted_at',
 ] as const;
 
-const routeColumns = [
-  'id',
-  'name',
-  'departure_at',
-  'order_acceptance_ends_at',
-  'description',
-  'created_at',
-  'updated_at',
-  'deleted_at',
-] as const;
+const orderRouteColumns = ['id', 'schedule'] as const;
 
 const orderReadTransaction = { isolationLevel: 'repeatable read' } as const;
 
@@ -105,7 +99,12 @@ type DetailedOrderItem = OrderItemWithDishName & {
   dish_available_weekdays: DishModel['available_weekdays'];
 };
 
-type OrderRoute = Pick<RouteModel, 'id' | 'departure_at' | 'order_acceptance_ends_at'>;
+type OrderRoute = Pick<RouteModel, typeof orderRouteColumns[number]>;
+
+const getSavedOrderRouteTimes = (order: OrderModel): RouteTimes => ({
+  departureAt: new Date(Number(order.route_departure_unix) * 1000),
+  orderAcceptanceEndsAt: new Date(Number(order.route_acceptance_ends_unix) * 1000),
+});
 
 const toOrderItemDto = (item: OrderItemWithDishName) => ({
   dishId: item.dish_id,
@@ -257,8 +256,8 @@ const loadCompany = async (id: number, connection = db): Promise<{ id: number; a
     .first();
 
 const selectOrderRoute = (id: number, connection = db) =>
-  connection<RouteModel>('routes')
-    .select('id', 'departure_at', 'order_acceptance_ends_at')
+  connection<OrderRoute>('routes')
+    .select(...orderRouteColumns)
     .where({ id })
     .whereNull('deleted_at');
 
@@ -266,16 +265,16 @@ const getAvailableRouteForCompany = async (
   companyId: number,
   now: Date,
   connection = db
-): Promise<OrderRoute | undefined> =>
-  connection<RouteModel>('routes as r')
+): Promise<OrderRoute | undefined> => {
+  const route = await connection<OrderRoute>('routes as r')
     .join('route_companies as rc', 'rc.route_id', 'r.id')
-    .select('r.id', 'r.departure_at', 'r.order_acceptance_ends_at')
+    .select(...orderRouteColumns.map((column) => `r.${column}`))
     .where('rc.company_id', companyId)
     .whereNull('r.deleted_at')
-    .andWhereRaw('r.order_acceptance_ends_at > FROM_UNIXTIME(?)', [now.getTime() / 1000])
-    .andWhereRaw('r.departure_at > FROM_UNIXTIME(?)', [now.getTime() / 1000])
-    .orderBy('r.departure_at', 'asc')
     .first();
+
+  return route && getNextOrderableRoute(readRouteSchedule(route.schedule), now) ? route : undefined;
+};
 
 const normalizeRequestedItems = (items: RequestedOrderItem[]): RequestedOrderItem[] => {
   const aggregated = new Map<number, number>();
@@ -475,10 +474,10 @@ const requireManagerOrAdminForOrder = async (req: AuthRequest, order: OrderModel
   throw new AppError('Forbidden', 403);
 };
 
-const isOrderAcceptanceOpen = (route: OrderRoute): boolean =>
-  new Date(route.order_acceptance_ends_at).getTime() > Date.now();
+const isOrderAcceptanceOpen = (times: RouteTimes): boolean =>
+  times.orderAcceptanceEndsAt.getTime() > Date.now();
 
-const ensureOrderAcceptanceIsOpen = (route: OrderRoute): void => {
+const ensureOrderAcceptanceIsOpen = (route: RouteTimes): void => {
   if (!isOrderAcceptanceOpen(route)) {
     throw new AppError('Order acceptance time has ended for this route', 409);
   }
@@ -488,7 +487,7 @@ const toOrderDetailsDto = (
   order: OrderModel,
   items: DetailedOrderItem[],
   viewer: UserModel,
-  route: OrderRoute | undefined
+  route: RouteTimes | undefined
 ) => {
   const weekday = getBusinessIsoWeekday();
   return {
@@ -500,11 +499,11 @@ const toOrderDetailsDto = (
         isAvailableOnWeekday(item.dish_available_weekdays, weekday),
     })),
     canEdit: canEditOrder(viewer, order) && order.status === 'created' && Boolean(route && isOrderAcceptanceOpen(route)),
-    orderAcceptanceEndsAt: toNullableIsoString(route?.order_acceptance_ends_at),
+    orderAcceptanceEndsAt: toNullableIsoString(route?.orderAcceptanceEndsAt),
   };
 };
 
-const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction): Promise<OrderRoute> => {
+const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction): Promise<RouteTimes> => {
   if (order.status !== 'created') {
     throw new AppError('Only created orders can be edited', 409);
   }
@@ -516,8 +515,9 @@ const ensureOrderIsEditable = async (order: OrderModel, trx?: Knex.Transaction):
     throw new AppError('Route not found', 404);
   }
 
-  ensureOrderAcceptanceIsOpen(route);
-  return route;
+  const times = getSavedOrderRouteTimes(order);
+  ensureOrderAcceptanceIsOpen(times);
+  return times;
 };
 
 const recalculateOrderTotals = async (trx: typeof db, orderId: number, itemsChanged = false): Promise<void> => {
@@ -689,7 +689,7 @@ export const getOrderById = async (req: AuthRequest, res: Response, next: NextFu
       ensureOrderViewer(viewer, order);
       const items = await loadOrderItems(orderId, trx);
       const route = await selectOrderRoute(order.route_id, trx).first();
-      return toOrderDetailsDto(order, items, viewer, route);
+      return toOrderDetailsDto(order, items, viewer, route && getSavedOrderRouteTimes(order));
     }, orderReadTransaction);
 
     res.json(details);
@@ -782,14 +782,23 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         .where({ route_id: route.id, company_id: companyId })
         .forShare()
         .first();
-      if (!route || !assignment || new Date(route.departure_at).getTime() <= Date.now()) {
+      if (!route || !assignment) {
         throw new AppError('No active route is available for this company', 409);
       }
-      ensureOrderAcceptanceIsOpen(route);
+      const occurrence = getNextOrderableRoute(readRouteSchedule(route.schedule), now);
+      if (!occurrence) {
+        throw new AppError('Order acceptance time has ended for this route', 409);
+      }
+      if (occurrence.departureAt.getTime() <= Date.now()) {
+        throw new AppError('No active route is available for this company', 409);
+      }
+      ensureOrderAcceptanceIsOpen(occurrence);
       const result = await trx('orders').insert({
         user_id: user.id,
         company_id: companyId,
         route_id: route.id,
+        route_departure_unix: occurrence.departureAt.getTime() / 1000,
+        route_acceptance_ends_unix: occurrence.orderAcceptanceEndsAt.getTime() / 1000,
         status: 'created',
         subtotal_cents: 0,
         delivery_fee_cents: 0,

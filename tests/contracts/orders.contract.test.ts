@@ -3,6 +3,7 @@ import test from 'node:test';
 import db from '../../src/db/knex';
 import { BUSINESS_TIME_ZONE, getBusinessDay, getBusinessIsoWeekday } from '../../src/utils/businessTime';
 import { generateToken } from '../../src/utils/generateToken';
+import { getNextScheduledRoute, readRouteSchedule } from '../../src/utils/routeSchedule';
 import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
 
@@ -74,8 +75,8 @@ serialTest('GET /api/orders/:id returns order details with items for owner, mana
     assert.equal(payload.id, 1);
     assert.equal(payload.items.length, 2);
     assert.equal(payload.canEdit, true);
-    const route = await db('routes').where({ id: payload.routeId }).first();
-    assert.equal(payload.orderAcceptanceEndsAt, route.order_acceptance_ends_at.toISOString());
+    const order = await db('orders').where({ id: payload.id }).first('route_acceptance_ends_unix');
+    assert.equal(payload.orderAcceptanceEndsAt, new Date(Number(order.route_acceptance_ends_unix) * 1000).toISOString());
   } finally {
     await stopTestServer(server);
   }
@@ -382,8 +383,8 @@ serialTest('PUT /api/orders/:id rejects updates after route cutoff time', async 
   const { server, baseUrl } = await startTestServer();
 
   try {
-    await db('routes').where({ id: 2 }).update({
-      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    await db('orders').where({ id: 1 }).update({
+      route_acceptance_ends_unix: Math.floor(Date.now() / 1000) - 60,
     });
 
     const response = await fetch(`${baseUrl}/api/orders/1`, {
@@ -407,8 +408,8 @@ serialTest('DELETE /api/orders/:id rejects cancellation after route cutoff time'
   const { server, baseUrl } = await startTestServer();
 
   try {
-    await db('routes').where({ id: 2 }).update({
-      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    await db('orders').where({ id: 1 }).update({
+      route_acceptance_ends_unix: Math.floor(Date.now() / 1000) - 60,
     });
 
     const response = await fetch(`${baseUrl}/api/orders/1`, {
@@ -519,13 +520,19 @@ serialTest('Order creation checks a cutoff changed by a concurrent route update'
   await moveOrderToPreviousDay();
   const { server, baseUrl } = await startTestServer();
   const routeUpdate = await db.transaction();
+  const originalNow = Date.now;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let onQuery: ((query: { sql: string }) => void) | undefined;
   let creation: Promise<Response> | undefined;
   try {
     const order = await db('orders').where({ id: 1 }).first('route_id');
+    const route = await db('routes').where({ id: order.route_id }).first('schedule');
+    const schedule = readRouteSchedule(route.schedule);
+    const occurrence = getNextScheduledRoute(schedule, new Date());
+    const now = occurrence.orderAcceptanceEndsAt.getTime() - 60_000;
+    Date.now = () => now;
     await routeUpdate('routes').where({ id: order.route_id }).update({
-      order_acceptance_ends_at: new Date(Date.now() - 60_000),
+      schedule: JSON.stringify({ ...schedule, orderAcceptanceEndsTime: '09:00' }),
     });
     const reachedWrite = new Promise<void>((resolve, reject) => {
       onQuery = ({ sql }) => {
@@ -553,6 +560,7 @@ serialTest('Order creation checks a cutoff changed by a concurrent route update'
     if (onQuery) db.removeListener('query', onQuery);
     if (!routeUpdate.isCompleted()) await routeUpdate.rollback();
     await creation?.catch(() => {});
+    Date.now = originalNow;
     await stopTestServer(server);
   }
 });
@@ -662,8 +670,8 @@ serialTest('PUT /api/orders/:id/dishes rejects full replacement after route cuto
   const { server, baseUrl } = await startTestServer();
 
   try {
-    await db('routes').where({ id: 2 }).update({
-      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
+    await db('orders').where({ id: 1 }).update({
+      route_acceptance_ends_unix: Math.floor(Date.now() / 1000) - 60,
     });
 
     const response = await fetch(`${baseUrl}/api/orders/1/dishes`, {
@@ -690,7 +698,7 @@ serialTest('GET details and PUT replacement close at the exact route cutoff', as
   try {
     const cutoffMs = Math.floor(Date.now() / 1000) * 1000 + 60_000;
     const cutoff = new Date(cutoffMs);
-    await db('routes').where({ id: 2 }).update({ order_acceptance_ends_at: cutoff });
+    await db('orders').where({ id: 1 }).update({ route_acceptance_ends_unix: cutoffMs / 1000 });
 
     let now = cutoffMs - 1;
     Date.now = () => now;
@@ -1035,8 +1043,7 @@ test('The new order day starts at Moscow midnight, including when a legacy key i
       order_day: '2026-11-21',
     });
     await db('routes').where({ id: 2 }).update({
-      departure_at: db.raw('FROM_UNIXTIME(?)', [(midnight + 120_000) / 1000]),
-      order_acceptance_ends_at: db.raw('FROM_UNIXTIME(?)', [(midnight + 60_000) / 1000]),
+      schedule: JSON.stringify({ weekdays: [6], departureTime: '00:02', orderAcceptanceEndsTime: '00:01' }),
     });
     Date.now = () => now;
     const headers = { Authorization: `Bearer ${employeeToken()}`, 'Content-Type': 'application/json' };
@@ -1060,12 +1067,14 @@ test('The new order day starts at Moscow midnight, including when a legacy key i
 
 serialTest('POST /api/orders rejects creation after route cutoff time', async () => {
   const { server, baseUrl } = await startTestServer();
+  const originalNow = Date.now;
 
   try {
     await moveOrderToPreviousDay();
-    await db('routes').where({ id: 2 }).update({
-      order_acceptance_ends_at: new Date(Date.now() - 60 * 1000),
-    });
+    const route = await db('routes').where({ id: 2 }).first('schedule');
+    const occurrence = getNextScheduledRoute(readRouteSchedule(route.schedule), new Date());
+    const now = occurrence.orderAcceptanceEndsAt.getTime() + 60_000;
+    Date.now = () => now;
 
     const response = await fetch(`${baseUrl}/api/orders`, {
       method: 'POST',
@@ -1080,6 +1089,126 @@ serialTest('POST /api/orders rejects creation after route cutoff time', async ()
 
     assert.equal(response.status, 409);
   } finally {
+    Date.now = originalNow;
+    await stopTestServer(server);
+  }
+});
+
+test('Weekly order creation respects the upcoming cutoff and preserves the booked occurrence', {
+  concurrency: false,
+  skip: BUSINESS_TIME_ZONE !== 'Europe/Moscow',
+}, async () => {
+  const { server, baseUrl } = await startTestServer();
+  const originalNow = Date.now;
+  let now = Date.parse('2026-11-27T09:00:00Z');
+
+  try {
+    await db('orders').where({ id: 1 }).update({
+      created_at: db.raw('FROM_UNIXTIME(?)', [Date.parse('2026-11-26T08:00:00Z') / 1000]),
+      order_day: null,
+    });
+
+    Date.now = () => now;
+    const schedule = { weekdays: [1, 5], departureTime: '13:00', orderAcceptanceEndsTime: '12:00' };
+    const setSchedule = (weekdays: number[]) => fetch(`${baseUrl}/api/routes/2`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedule: { ...schedule, weekdays } }),
+    });
+    assert.equal((await setSchedule(schedule.weekdays)).status, 200);
+
+    const createOrder = () => fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${employeeToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ dishId: 1, qty: 1 }] }),
+    });
+    const rejected = await createOrder();
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).message, 'No active route is available for this company');
+
+    now = Date.parse('2026-11-27T10:00:00Z');
+    const created = await createOrder();
+    assert.equal(created.status, 201);
+    const { id } = await created.json();
+    const order = await db('orders').where({ id }).first();
+    assert.equal(Number(order.route_departure_unix), Date.parse('2026-11-30T10:00:00Z') / 1000);
+    assert.equal(Number(order.route_acceptance_ends_unix), Date.parse('2026-11-30T09:00:00Z') / 1000);
+
+    assert.equal((await setSchedule([2])).status, 200);
+    const orderDetails = () => fetch(`${baseUrl}/api/orders/${id}`, {
+      headers: { Authorization: `Bearer ${employeeToken()}` },
+    });
+    const beforeCutoff = await orderDetails();
+    assert.equal(beforeCutoff.status, 200);
+    const details = await beforeCutoff.json();
+    assert.equal(details.canEdit, true);
+    assert.equal(details.orderAcceptanceEndsAt, '2026-11-30T09:00:00.000Z');
+
+    now = Date.parse(details.orderAcceptanceEndsAt);
+    assert.equal((await (await orderDetails()).json()).canEdit, false);
+    const edit = await fetch(`${baseUrl}/api/orders/${id}/dishes`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${employeeToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ dishId: 1, qty: 2 }] }),
+    });
+    assert.equal(edit.status, 409);
+    assert.equal((await edit.json()).message, 'Order acceptance time has ended for this route');
+  } finally {
+    Date.now = originalNow;
+    await stopTestServer(server);
+  }
+});
+
+test('An eight-day cutoff books the first weekly departure still accepting orders', {
+  concurrency: false,
+  skip: BUSINESS_TIME_ZONE !== 'Europe/Moscow',
+}, async () => {
+  const { server, baseUrl } = await startTestServer();
+  const originalNow = Date.now;
+  const now = Date.parse('2026-11-27T09:00:00Z');
+
+  try {
+    await db('orders').where({ id: 1 }).update({
+      created_at: db.raw('FROM_UNIXTIME(?)', [(now - 24 * 3600_000) / 1000]),
+      order_day: null,
+    });
+    Date.now = () => now;
+    const adminHeaders = { Authorization: `Bearer ${adminToken()}`, 'Content-Type': 'application/json' };
+    const schedule = {
+      weekdays: [5],
+      departureTime: '13:00',
+      orderAcceptanceEndsTime: '18:00',
+      orderAcceptanceDaysBefore: 8,
+    };
+    const updated = await fetch(`${baseUrl}/api/routes/2`, {
+      method: 'PUT',
+      headers: adminHeaders,
+      body: JSON.stringify({ schedule }),
+    });
+    assert.equal(updated.status, 200);
+    const routeResponse = await fetch(`${baseUrl}/api/routes/2`, { headers: adminHeaders });
+    assert.equal(routeResponse.status, 200);
+    assert.equal((await routeResponse.json()).departureAt, '2026-11-27T10:00:00.000Z');
+
+    const headers = { Authorization: `Bearer ${employeeToken()}`, 'Content-Type': 'application/json' };
+    const response = await fetch(`${baseUrl}/api/orders`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ items: [{ dishId: 1, qty: 1 }] }),
+    });
+    assert.equal(response.status, 201);
+    const { id } = await response.json();
+    const order = await db('orders').where({ id }).first();
+    assert.equal(Number(order.route_departure_unix), Date.parse('2026-12-11T10:00:00Z') / 1000);
+    assert.equal(Number(order.route_acceptance_ends_unix), Date.parse('2026-12-03T15:00:00Z') / 1000);
+
+    const detailsResponse = await fetch(`${baseUrl}/api/orders/${id}`, { headers });
+    assert.equal(detailsResponse.status, 200);
+    const details = await detailsResponse.json();
+    assert.equal(details.orderAcceptanceEndsAt, '2026-12-03T15:00:00.000Z');
+    assert.equal(details.canEdit, true);
+  } finally {
+    Date.now = originalNow;
     await stopTestServer(server);
   }
 });

@@ -26,6 +26,19 @@ const dateKey = (formatter: Intl.DateTimeFormat, timestamp: number): string => {
   return `${year}-${month}-${day}`;
 };
 
+const makeDateFormatter = (timeZone: string): Intl.DateTimeFormat =>
+  new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+const businessDateFormatter = makeDateFormatter(BUSINESS_TIME_ZONE);
+
+export const getBusinessDateKey = (date: Date, timeZone = BUSINESS_TIME_ZONE): string =>
+  dateKey(timeZone === BUSINESS_TIME_ZONE ? businessDateFormatter : makeDateFormatter(timeZone), date.getTime());
+
 const findDayStart = (formatter: Intl.DateTimeFormat, day: string): Date => {
   const utcMidnight = Date.parse(`${day}T00:00:00Z`);
   let before = utcMidnight - 2 * DAY_MS;
@@ -48,12 +61,7 @@ export const getBusinessDay = (
   capturedAt = new Date(Date.now()),
   timeZone = BUSINESS_TIME_ZONE
 ): BusinessDay => {
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  const formatter = timeZone === BUSINESS_TIME_ZONE ? businessDateFormatter : makeDateFormatter(timeZone);
   const day = dateKey(formatter, capturedAt.getTime());
   const nextDate = new Date(Date.parse(`${day}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
 

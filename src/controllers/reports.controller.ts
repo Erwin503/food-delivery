@@ -97,8 +97,6 @@ const formatTime = (value: Date): string =>
     minute: '2-digit',
   }).format(value);
 
-const sqlTimestamp = (value: Date) => db.raw('FROM_UNIXTIME(?)', [value.getTime() / 1000]);
-
 const formatMoney = (cents: number): string => `${(cents / 100).toFixed(2)} \u20bd`;
 
 const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
@@ -125,7 +123,7 @@ const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = t
       'u.full_name as user_name',
       'r.id as route_id',
       'r.name as route_name',
-      db.raw('UNIX_TIMESTAMP(r.departure_at) as departure_at'),
+      'o.route_departure_unix as departure_at',
       'd.name as dish_name',
       'oi.qty',
       'oi.base_price_cents',
@@ -140,9 +138,9 @@ const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = t
     .modify((query) => {
       if (!includeCancelled) query.whereNot('o.status', 'cancelled');
     })
-    .where('r.departure_at', '>=', sqlTimestamp(start))
-    .andWhere('r.departure_at', '<', sqlTimestamp(end))
-    .orderBy('r.departure_at', 'asc')
+    .where('o.route_departure_unix', '>=', start.getTime() / 1000)
+    .andWhere('o.route_departure_unix', '<', end.getTime() / 1000)
+    .orderBy('o.route_departure_unix', 'asc')
     .orderBy('c.name', 'asc')
     .orderBy('u.full_name', 'asc')
     .orderBy('o.id', 'asc')
@@ -159,8 +157,8 @@ const loadTodayDishSummary = async ({ start, end }: BusinessDay): Promise<TodayD
     .whereNull('o.deleted_at')
     .whereNull('r.deleted_at')
     .whereNot('o.status', 'cancelled')
-    .where('r.departure_at', '>=', sqlTimestamp(start))
-    .andWhere('r.departure_at', '<', sqlTimestamp(end))
+    .where('o.route_departure_unix', '>=', start.getTime() / 1000)
+    .andWhere('o.route_departure_unix', '<', end.getTime() / 1000)
     .groupBy('d.id', 'd.name')
     .select(
       'd.name as dish_name',
@@ -214,10 +212,11 @@ const aggregateOrdersByCompany = (rows: TodayOrderRow[]): CompanyOrders[] => {
 };
 
 const aggregateOrdersByRoute = (rows: TodayOrderRow[]): RouteOrders[] => {
-  const routes = new Map<number, RouteOrders>();
+  const routes = new Map<string, RouteOrders>();
 
   for (const row of rows) {
-    const route = routes.get(row.route_id) ?? {
+    const occurrenceKey = `${row.route_id}:${row.departure_at.getTime()}`;
+    const route = routes.get(occurrenceKey) ?? {
       routeId: row.route_id,
       routeName: row.route_name,
       departureAt: row.departure_at,
@@ -257,7 +256,7 @@ const aggregateOrdersByRoute = (rows: TodayOrderRow[]): RouteOrders[] => {
       });
     }
 
-    routes.set(row.route_id, route);
+    routes.set(occurrenceKey, route);
   }
 
   return Array.from(routes.values());

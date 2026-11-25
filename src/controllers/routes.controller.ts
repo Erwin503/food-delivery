@@ -1,19 +1,25 @@
 import { NextFunction, Response } from 'express';
 import { Knex } from 'knex';
 import db from '../db/knex';
+import type { RouteDto } from '../dto/route.dto';
 import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { CompanyModel, RouteModel, UserModel } from '../models';
+import { BUSINESS_TIME_ZONE } from '../utils/businessTime';
 import { toNullableIsoString } from '../utils/dateMapper';
 import { requireEntity } from '../utils/entityGuards';
 import { parseRequiredId } from '../utils/requestParams';
+import {
+  getNextScheduledRoute,
+  parseWeeklyRouteSchedule,
+  readRouteSchedule,
+} from '../utils/routeSchedule';
 import { requireAuthenticatedUser } from '../utils/userQueries';
 
 const routeColumns = [
   'id',
   'name',
-  'departure_at',
-  'order_acceptance_ends_at',
+  'schedule',
   'description',
   'created_at',
   'updated_at',
@@ -21,48 +27,57 @@ const routeColumns = [
 ] as const;
 
 const companyColumns = ['id', 'name'] as const;
+const lastRouteFilterTime = Date.parse('9999-12-31T23:59:59.999Z');
 
 const isOmittedValue = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
 
-const toSqlDateTime = (value: string | Date): string => {
+const parseRouteDate = (value: string | Date): Date => {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
     throw new AppError('Route dates must be valid ISO date strings', 400);
   }
 
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  return date;
+};
+
+const parseRouteFilterDate = (value: string): Date => {
+  const date = parseRouteDate(value);
+  const year = date.getUTCFullYear();
+  if (year < 1000 || year > 9999) {
+    throw new AppError('Route filter dates must use years from 1000 to 9999', 400);
+  }
+  return date;
+};
+
+const rejectAbsoluteRouteTimes = (body: Record<string, unknown>): void => {
+  if (body.departureAt !== undefined || body.orderAcceptanceEndsAt !== undefined) {
+    throw new AppError('Set route times in schedule', 400);
+  }
 };
 
 const toRouteDto = (
   route: RouteModel,
+  from: Date,
   companies?: Array<Pick<CompanyModel, 'id' | 'name'>>
-) => ({
-  id: route.id,
-  name: route.name,
-  departureAt: new Date(route.departure_at).toISOString(),
-  orderAcceptanceEndsAt: new Date(route.order_acceptance_ends_at).toISOString(),
-  description: route.description,
-  createdAt: toNullableIsoString(route.created_at),
-  updatedAt: toNullableIsoString(route.updated_at),
-  companies: companies?.map((company) => ({
-    id: company.id,
-    name: company.name,
-  })),
-});
-
-const validateRouteTimes = (departureAt: string, orderAcceptanceEndsAt: string) => {
-  const departureDate = new Date(departureAt);
-  const cutoffDate = new Date(orderAcceptanceEndsAt);
-
-  if (Number.isNaN(departureDate.getTime()) || Number.isNaN(cutoffDate.getTime())) {
-    throw new AppError('Route dates must be valid ISO date strings', 400);
-  }
-
-  if (cutoffDate.getTime() >= departureDate.getTime()) {
-    throw new AppError('Order acceptance end time must be before departure time', 400);
-  }
+): RouteDto => {
+  const schedule = readRouteSchedule(route.schedule);
+  const times = getNextScheduledRoute(schedule, from);
+  return {
+    id: route.id,
+    name: route.name,
+    departureAt: times.departureAt.toISOString(),
+    orderAcceptanceEndsAt: times.orderAcceptanceEndsAt.toISOString(),
+    schedule: { ...schedule, timeZone: BUSINESS_TIME_ZONE },
+    description: route.description,
+    createdAt: toNullableIsoString(route.created_at),
+    updatedAt: toNullableIsoString(route.updated_at),
+    companies: companies?.map((company) => ({
+      id: company.id,
+      name: company.name,
+    })),
+  };
 };
 
 const normalizeCompanyIds = (value: unknown): number[] => {
@@ -183,21 +198,16 @@ export const getRoutes = async (req: AuthRequest, res: Response, next: NextFunct
   try {
     await requireAuthenticatedUser(req.user);
 
-    const query = db<RouteModel>('routes')
-      .select(...routeColumns)
-      .whereNull('deleted_at')
-      .orderBy('departure_at', 'asc');
+    const dateFrom = req.query.dateFrom ? parseRouteFilterDate(String(req.query.dateFrom)) : null;
+    const dateTo = req.query.dateTo ? parseRouteFilterDate(String(req.query.dateTo)) : null;
+    const from = dateFrom ?? new Date(Date.now() + 1);
+    const activeRoutes = await db<RouteModel>('routes').select(...routeColumns).whereNull('deleted_at');
 
-    if (req.query.dateFrom) {
-      query.andWhere('departure_at', '>=', toSqlDateTime(String(req.query.dateFrom)));
-    }
-
-    if (req.query.dateTo) {
-      query.andWhere('departure_at', '<=', toSqlDateTime(String(req.query.dateTo)));
-    }
-
-    const routes = await query;
-    res.json(routes.map((route) => toRouteDto(route)));
+    const routes = activeRoutes
+      .map((route) => toRouteDto(route, from))
+      .filter((route) => Date.parse(route.departureAt) <= (dateTo?.getTime() ?? lastRouteFilterTime))
+      .sort((left, right) => left.departureAt.localeCompare(right.departureAt));
+    res.json(routes);
   } catch (error) {
     next(error);
   }
@@ -210,7 +220,7 @@ export const getRouteById = async (req: AuthRequest, res: Response, next: NextFu
 
     const route = await requireRoute(routeId);
     const companies = await loadRouteCompanies(routeId);
-    res.json(toRouteDto(route, companies));
+    res.json(toRouteDto(route, new Date(Date.now() + 1), companies));
   } catch (error) {
     next(error);
   }
@@ -219,21 +229,20 @@ export const getRouteById = async (req: AuthRequest, res: Response, next: NextFu
 export const createRoute = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     await requireAuthenticatedUser(req.user);
-    const { name, departureAt, orderAcceptanceEndsAt, description, companyIds } = req.body;
-
-    if (!name || !departureAt || !orderAcceptanceEndsAt) {
-      throw new AppError('name, departureAt, and orderAcceptanceEndsAt are required', 400);
+    const { name, description, companyIds } = req.body;
+    rejectAbsoluteRouteTimes(req.body);
+    if (!name) {
+      throw new AppError('name is required', 400);
     }
 
-    validateRouteTimes(departureAt, orderAcceptanceEndsAt);
+    const schedule = parseWeeklyRouteSchedule(req.body.schedule);
     const normalizedCompanyIds = normalizeCompanyIds(companyIds);
+    const now = new Date(Date.now());
 
-    const now = new Date();
     const insertedId = await db.transaction(async (trx) => {
       const result = await trx('routes').insert({
         name: String(name),
-        departure_at: toSqlDateTime(departureAt),
-        order_acceptance_ends_at: toSqlDateTime(orderAcceptanceEndsAt),
+        schedule: JSON.stringify(schedule),
         description: description ?? null,
         created_at: now,
         updated_at: now,
@@ -249,7 +258,7 @@ export const createRoute = async (req: AuthRequest, res: Response, next: NextFun
 
     const route = await requireRoute(insertedId);
     const companies = await loadRouteCompanies(insertedId);
-    res.status(201).json(toRouteDto(route, companies));
+    res.status(201).json(toRouteDto(route, new Date(Date.now() + 1), companies));
   } catch (error) {
     next(error);
   }
@@ -264,30 +273,19 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
       updated_at: new Date(),
     };
 
-    const departureAt = req.body.departureAt;
-    const orderAcceptanceEndsAt = req.body.orderAcceptanceEndsAt;
-
+    rejectAbsoluteRouteTimes(req.body);
+    if (req.body.schedule !== undefined) {
+      patch.schedule = JSON.stringify(parseWeeklyRouteSchedule(req.body.schedule));
+    }
     if (!isOmittedValue(req.body.name)) {
       patch.name = req.body.name;
-    }
-    if (!isOmittedValue(departureAt)) {
-      patch.departure_at = toSqlDateTime(req.body.departureAt);
-    }
-    if (!isOmittedValue(orderAcceptanceEndsAt)) {
-      patch.order_acceptance_ends_at = toSqlDateTime(req.body.orderAcceptanceEndsAt);
     }
     if (req.body.description !== undefined) {
       patch.description = req.body.description ?? null;
     }
 
     await db.transaction(async (trx) => {
-      const current = await requireRoute(routeId, trx);
-      if (!isOmittedValue(departureAt) || !isOmittedValue(orderAcceptanceEndsAt)) {
-        validateRouteTimes(
-          String(isOmittedValue(departureAt) ? current.departure_at : departureAt),
-          String(isOmittedValue(orderAcceptanceEndsAt) ? current.order_acceptance_ends_at : orderAcceptanceEndsAt)
-        );
-      }
+      await requireRoute(routeId, trx);
       await trx('routes').where({ id: routeId }).update(patch);
 
       if (!isOmittedValue(req.body.companyIds)) {
@@ -297,7 +295,7 @@ export const updateRoute = async (req: AuthRequest, res: Response, next: NextFun
 
     const route = await requireRoute(routeId);
     const companies = await loadRouteCompanies(routeId);
-    res.json(toRouteDto(route, companies));
+    res.json(toRouteDto(route, new Date(Date.now() + 1), companies));
   } catch (error) {
     next(error);
   }

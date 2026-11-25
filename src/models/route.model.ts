@@ -1,9 +1,15 @@
 import { SoftDeleteColumns } from './common.model';
 
+export interface WeeklyRouteSchedule {
+  weekdays: number[];
+  departureTime: string;
+  orderAcceptanceEndsTime: string;
+  orderAcceptanceDaysBefore?: number;
+}
+
 export interface RouteModel extends SoftDeleteColumns {
   id: number;
   name: string;
-  departure_at: Date | string;
-  order_acceptance_ends_at: Date | string;
+  schedule: WeeklyRouteSchedule | string;
   description: string | null;
 }

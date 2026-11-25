@@ -278,7 +278,7 @@ router.get('/orders/my', authenticateToken, checkRole(['employee', 'manager', 'a
  * @swagger
  * /orders/can-create-today:
  *   get:
- *     summary: Check whether current user can create an order today
+ *     summary: Check whether current user has reached the daily order limit
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -351,6 +351,7 @@ router.get('/orders/:id', authenticateToken, getOrderById);
  * /orders:
  *   post:
  *     summary: Create a new order draft from dishes and quantities
+ *     description: When acceptance closes on an earlier date, orders use the first departure with an open cutoff. With a same-day cutoff, orders close until that departure leaves.
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []

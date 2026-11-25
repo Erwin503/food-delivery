@@ -1,11 +1,18 @@
 import { hashSync } from 'bcryptjs';
 import { Knex } from 'knex';
+import { getBusinessDay, getBusinessIsoWeekday } from '../src/utils/businessTime';
+import { getNextScheduledRoute, RouteTimes } from '../src/utils/routeSchedule';
 
 const now = '2026-03-15 09:00:00';
 const defaultPasswordHash = hashSync('Password123!', 10);
 const verifiedAt = '2026-03-15 09:01:00';
 
 const toSqlDateTime = (date: Date) => date.toISOString().slice(0, 19).replace('T', ' ');
+
+const orderRouteSnapshot = (times: RouteTimes) => ({
+  route_departure_unix: times.departureAt.getTime() / 1000,
+  route_acceptance_ends_unix: times.orderAcceptanceEndsAt.getTime() / 1000,
+});
 
 export async function seed(knex: Knex): Promise<void> {
   await knex.raw('SET FOREIGN_KEY_CHECKS = 0');
@@ -250,22 +257,22 @@ export async function seed(knex: Knex): Promise<void> {
     { id: 5, category_id: 3, name: 'Лимонад тархун', description: 'Газированный напиток 0.33 л.', base_price_cents: 12900, discount_price_cents: 10900, is_active: false, created_at: now, updated_at: now, deleted_at: null },
   ]);
 
-  const morningRouteDeparture = new Date(runtimeNow.getTime() + 24 * 60 * 60 * 1000);
-  morningRouteDeparture.setHours(8, 0, 0, 0);
-  const morningRouteCutoff = new Date(morningRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
-
-  const dayRouteDeparture = new Date(runtimeNow.getTime() + 24 * 60 * 60 * 1000);
-  dayRouteDeparture.setHours(12, 0, 0, 0);
-  const dayRouteCutoff = new Date(dayRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
-
-  const archiveRouteDeparture = new Date(runtimeNow.getTime() - 24 * 60 * 60 * 1000);
-  archiveRouteDeparture.setHours(12, 0, 0, 0);
-  const archiveRouteCutoff = new Date(archiveRouteDeparture.getTime() - 2 * 60 * 60 * 1000);
+  const today = getBusinessDay(runtimeNow);
+  const nextDayStart = today.end;
+  const priorDayStart = getBusinessDay(new Date(today.start.getTime() - 1)).start;
+  const nextWeekday = getBusinessIsoWeekday(nextDayStart);
+  const priorWeekday = getBusinessIsoWeekday(priorDayStart);
+  const morningSchedule = { weekdays: [nextWeekday], departureTime: '08:00', orderAcceptanceEndsTime: '06:00' };
+  const daySchedule = { weekdays: [nextWeekday], departureTime: '12:00', orderAcceptanceEndsTime: '10:00' };
+  const archiveSchedule = { ...daySchedule, weekdays: [priorWeekday] };
+  const morningSnapshot = orderRouteSnapshot(getNextScheduledRoute(morningSchedule, nextDayStart));
+  const daySnapshot = orderRouteSnapshot(getNextScheduledRoute(daySchedule, nextDayStart));
+  const archiveSnapshot = orderRouteSnapshot(getNextScheduledRoute(archiveSchedule, priorDayStart));
 
   await knex('routes').insert([
-    { id: 1, name: 'Утренний рейс', departure_at: toSqlDateTime(morningRouteDeparture), order_acceptance_ends_at: toSqlDateTime(morningRouteCutoff), description: 'Маршрут доставки по северному направлению.', created_at: now, updated_at: now, deleted_at: null },
-    { id: 2, name: 'Дневной рейс', departure_at: toSqlDateTime(dayRouteDeparture), order_acceptance_ends_at: toSqlDateTime(dayRouteCutoff), description: 'Основной корпоративный маршрут доставки.', created_at: now, updated_at: now, deleted_at: null },
-    { id: 3, name: 'Архивный рейс', departure_at: toSqlDateTime(archiveRouteDeparture), order_acceptance_ends_at: toSqlDateTime(archiveRouteCutoff), description: 'Прошлый рейс для завершённых доставок.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 1, name: 'Утренний рейс', schedule: JSON.stringify(morningSchedule), description: 'Маршрут доставки по северному направлению.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 2, name: 'Дневной рейс', schedule: JSON.stringify(daySchedule), description: 'Основной корпоративный маршрут доставки.', created_at: now, updated_at: now, deleted_at: null },
+    { id: 3, name: 'Архивный рейс', schedule: JSON.stringify(archiveSchedule), description: 'Прошлый рейс для завершённых доставок.', created_at: now, updated_at: now, deleted_at: null },
   ]);
 
   await knex('route_companies').insert([
@@ -275,9 +282,9 @@ export async function seed(knex: Knex): Promise<void> {
   ]);
 
   await knex('orders').insert([
-    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, status: 'created', subtotal_cents: 128800, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 143700, company_paid_cents: 100, employee_debt_cents: 143600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, company_paid_cents: 80000, employee_debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
-    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, company_paid_cents: 58800, employee_debt_cents: 0, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
+    { id: 1, order_number: '20260315-000001', user_id: 4, company_id: 1, route_id: 2, ...daySnapshot, status: 'created', subtotal_cents: 128800, delivery_fee_cents: 19900, discount_cents: 5000, total_cents: 143700, company_paid_cents: 100, employee_debt_cents: 143600, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 2, order_number: '20260315-000002', user_id: 6, company_id: 2, route_id: 1, ...morningSnapshot, status: 'paid', subtotal_cents: 123800, delivery_fee_cents: 0, discount_cents: 0, total_cents: 123800, company_paid_cents: 80000, employee_debt_cents: 43800, created_at: now, updated_at: now, deleted_at: null, cancelled_at: null },
+    { id: 3, order_number: '20260315-000003', user_id: 7, company_id: 3, route_id: 3, ...archiveSnapshot, status: 'completed', subtotal_cents: 48900, delivery_fee_cents: 9900, discount_cents: 0, total_cents: 58800, company_paid_cents: 58800, employee_debt_cents: 0, created_at: '2026-03-14 08:00:00', updated_at: '2026-03-14 13:30:00', deleted_at: null, cancelled_at: null },
   ]);
 
   await knex('order_items').insert([

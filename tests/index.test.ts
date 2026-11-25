@@ -38,6 +38,7 @@ if (testModule === 'all' || testModule === 'catalog') {
 }
 
 if (testModule === 'all' || testModule === 'routes') {
+  require('./route-schedule.test');
   require('./contracts/routes.contract.test');
 }
 

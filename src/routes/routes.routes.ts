@@ -59,6 +59,43 @@ router.get(
  *         name:
  *           type: string
  *           example: ООО Ромашка
+ *     WeeklyRouteSchedule:
+ *       type: object
+ *       required:
+ *         - weekdays
+ *         - departureTime
+ *         - orderAcceptanceEndsTime
+ *         - timeZone
+ *       properties:
+ *         weekdays:
+ *           type: array
+ *           minItems: 1
+ *           description: ISO weekdays from Monday (1) through Sunday (7). Select all seven for a daily route.
+ *           example: [1, 2, 3, 5]
+ *           items:
+ *             type: integer
+ *             minimum: 1
+ *             maximum: 7
+ *         departureTime:
+ *           type: string
+ *           pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'
+ *           example: '13:00'
+ *         orderAcceptanceEndsTime:
+ *           type: string
+ *           pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'
+ *           description: Must be earlier than departureTime when both times fall on the same day.
+ *           example: '11:00'
+ *         orderAcceptanceDaysBefore:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 364635
+ *           default: 0
+ *           description: Number of business-calendar days before each departure when order acceptance ends.
+ *         timeZone:
+ *           type: string
+ *           readOnly: true
+ *           description: Business time zone configured on the server for the schedule.
+ *           example: Europe/Moscow
  *     Route:
  *       type: object
  *       required:
@@ -66,6 +103,7 @@ router.get(
  *         - name
  *         - departureAt
  *         - orderAcceptanceEndsAt
+ *         - schedule
  *         - createdAt
  *         - updatedAt
  *       properties:
@@ -76,9 +114,13 @@ router.get(
  *         departureAt:
  *           type: string
  *           format: date-time
+ *           description: Absolute departure for the selected occurrence of the weekly route.
  *         orderAcceptanceEndsAt:
  *           type: string
  *           format: date-time
+ *           description: Absolute cutoff for the same occurrence.
+ *         schedule:
+ *           $ref: '#/components/schemas/WeeklyRouteSchedule'
  *         description:
  *           type: string
  *           nullable: true
@@ -94,21 +136,20 @@ router.get(
  *             $ref: '#/components/schemas/RouteCompany'
  *     CreateRouteRequest:
  *       type: object
- *       description: A company can belong to only one active route. Assigning it here moves it from its previous route.
+ *       description: A company can belong to only one active route.
  *       required:
  *         - name
- *         - departureAt
- *         - orderAcceptanceEndsAt
+ *         - schedule
+ *       not:
+ *         anyOf:
+ *           - required: [departureAt]
+ *           - required: [orderAcceptanceEndsAt]
  *       properties:
  *         name:
  *           type: string
  *           example: Дневной рейс
- *         departureAt:
- *           type: string
- *           format: date-time
- *         orderAcceptanceEndsAt:
- *           type: string
- *           format: date-time
+ *         schedule:
+ *           $ref: '#/components/schemas/WeeklyRouteSchedule'
  *         description:
  *           type: string
  *           nullable: true
@@ -118,16 +159,16 @@ router.get(
  *             type: integer
  *     UpdateRouteRequest:
  *       type: object
- *       description: A company can belong to only one active route. Updating companyIds moves listed companies from their previous routes.
+ *       description: Omitting schedule preserves the existing weekly schedule. A supplied schedule replaces it.
+ *       not:
+ *         anyOf:
+ *           - required: [departureAt]
+ *           - required: [orderAcceptanceEndsAt]
  *       properties:
  *         name:
  *           type: string
- *         departureAt:
- *           type: string
- *           format: date-time
- *         orderAcceptanceEndsAt:
- *           type: string
- *           format: date-time
+ *         schedule:
+ *           $ref: '#/components/schemas/WeeklyRouteSchedule'
  *         description:
  *           type: string
  *           nullable: true
@@ -150,6 +191,7 @@ router.get(
  * /routes:
  *   get:
  *     summary: List delivery routes
+ *     description: Weekly routes are represented by their first departure on or after dateFrom, or by their next departure if dateFrom is omitted. dateTo is an inclusive upper bound.
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -173,6 +215,8 @@ router.get(
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/Route'
+ *       400:
+ *         description: Invalid filter date or a year outside the range 1000 through 9999
  */
 router.get('/routes', authenticateToken, checkRole(['admin']), getRoutes);
 
@@ -181,6 +225,7 @@ router.get('/routes', authenticateToken, checkRole(['admin']), getRoutes);
  * /routes/{id}:
  *   get:
  *     summary: Get one route with assigned companies
+ *     description: A weekly route includes the absolute times for its next departure.
  *     tags: [Routes]
  *     security:
  *       - bearerAuth: []
@@ -221,6 +266,8 @@ router.get('/routes/:id', authenticateToken, checkRole(['admin']), getRouteById)
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Route'
+ *       400:
+ *         description: Missing or invalid route schedule or unsupported absolute route times
  *       409:
  *         description: One or more companies are already assigned to another route
  */
@@ -253,6 +300,8 @@ router.post('/routes', authenticateToken, checkRole(['admin']), createRoute);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Route'
+ *       400:
+ *         description: Missing or invalid route schedule or unsupported absolute route times
  *       409:
  *         description: One or more companies are already assigned to another route
  */
