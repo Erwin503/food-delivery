@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import db from '../../src/db/knex';
 import { lockAndSeedDb, releaseDbTestLock } from '../helpers/db-test-lock';
-import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay } from '../../src/utils/businessTime';
+import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay, getBusinessDayForDate, getBusinessIsoWeekday } from '../../src/utils/businessTime';
 import { generateToken } from '../../src/utils/generateToken';
 import { extractPdfText, findZipEntries, normalizePdfText } from '../helpers/report-file-utils';
 import { startTestServer, stopTestServer } from '../helpers/test-server';
@@ -36,8 +36,16 @@ const setOrderDepartures = async () => {
   const routeTimes = (day: BusinessDay, hours: number) => ({
     route_departure_unix: day.start.getTime() / 1000 + hours * 3600,
     route_acceptance_ends_unix: day.start.getTime() / 1000 + (hours - 2) * 3600,
+    created_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + 3600]),
   });
 
+  await db('routes').update({
+    schedule: JSON.stringify({
+      weekdays: [getBusinessIsoWeekday(today.start)],
+      departureTime: '10:00',
+      orderAcceptanceEndsTime: '08:00',
+    }),
+  });
   await db('orders').where({ id: 1 }).update(routeTimes(today, 13));
   await db('orders').where({ id: 2 }).update(routeTimes(today, 10));
   await db('orders').where({ id: 3 }).update(routeTimes(yesterday, 13));
@@ -64,7 +72,7 @@ serialTest('GET /api/reports/orders/today.pdf возвращает PDF с зак
     const body = normalizePdfText(extractPdfText(pdfBuffer));
 
     assert.match(body, /Зак/);
-    assert.match(body, /сегод/);
+    assert.match(body, /Сформировано/);
   } finally {
     await stopTestServer(server);
   }
@@ -105,27 +113,58 @@ serialTest('GET /api/reports/labels/today.pdf возвращает PDF с нак
   }
 });
 
-serialTest('Отмена исключает заказ из сводки кухни и наклеек, сохраняя его в реестре', async () => {
+serialTest('All reports share the selected date, order window and exclusion rules', async () => {
+  const date = '2026-04-18';
+  const day = getBusinessDayForDate(date)!;
+  const yesterday = getBusinessDay(new Date(day.start.getTime() - 1));
+  const fromOffset = (day: BusinessDay, seconds: number) =>
+    db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + seconds]);
+  const previousDeparture = fromOffset(yesterday, 13 * 3600);
+  const cutoff = fromOffset(day, 8 * 3600);
+  const validCreatedAt = fromOffset(yesterday, 13 * 3600 + 1);
+  const schedule = (weekdays: number[], departureTime: string, orderAcceptanceEndsTime: string) =>
+    JSON.stringify({ weekdays, departureTime, orderAcceptanceEndsTime });
+  await db('routes').where({ id: 1 }).update({ schedule: schedule([6], '10:00', '08:00') });
+  await db('routes').where({ id: 2 }).update({ schedule: schedule([5], '10:00', '08:00') });
+  await db('routes').where({ id: 3 }).update({ schedule: schedule([5], '13:00', '11:00') });
+  await db('orders').where({ id: 2 }).update({
+    route_departure_unix: day.start.getTime() / 1000 + 10 * 3600,
+    route_acceptance_ends_unix: day.start.getTime() / 1000 + 8 * 3600,
+    created_at: validCreatedAt,
+  });
+  await db('dishes').where({ id: 4 }).update({ name: 'ReportMarker' });
+
   const { server, baseUrl } = await startTestServer();
-  const reportRows: Array<Array<{ order_id?: number; dish_name?: string; total_qty?: number }>> = [];
-  const recordRows = (rows: typeof reportRows[number], { sql }: { sql: string }) => {
-    if (sql.includes('`orders` as `o`')) reportRows.push(rows);
+  const headers = { Authorization: `Bearer ${adminToken()}` };
+  const reportTypes = ['orders', 'dishes', 'labels'];
+  const checkReports = async (expected: boolean) => {
+    for (const type of reportTypes) {
+      const response = await fetch(`${baseUrl}/api/reports/${type}/today.pdf?date=${date}`, { headers });
+      const body = normalizePdfText(extractPdfText(await assertPdfResponse(response)));
+      assert.equal(response.headers.get('x-report-day'), date);
+      assert.equal(body.includes('ReportMarker'), expected, type);
+    }
   };
 
   try {
-    await db('orders').where({ id: 1 }).update({ status: 'cancelled', cancelled_at: new Date() });
-    db.on('query-response', recordRows);
-    for (const name of ['orders', 'dishes', 'labels']) {
-      await assertPdfResponse(await fetch(`${baseUrl}/api/reports/${name}/today.pdf`, {
-        headers: { Authorization: `Bearer ${adminToken()}` },
-      }));
+    await checkReports(true);
+    await db('orders').where({ id: 2 }).update({ created_at: previousDeparture });
+    await checkReports(false);
+    await db('orders').where({ id: 2 }).update({ created_at: cutoff });
+    await checkReports(false);
+    await db('orders').where({ id: 2 }).update({ created_at: validCreatedAt, status: 'cancelled' });
+    await checkReports(false);
+    await db('orders').where({ id: 2 }).update({ status: 'paid' });
+    await db('users').where({ id: 6 }).update({ deleted_at: new Date() });
+    await checkReports(false);
+    await db('users').where({ id: 6 }).update({ deleted_at: null });
+    await db('companies').where({ id: 2 }).update({ deleted_at: new Date() });
+    await checkReports(false);
+    for (const type of reportTypes) {
+      const response = await fetch(`${baseUrl}/api/reports/${type}/today.pdf?date=2026-02-30`, { headers });
+      assert.equal(response.status, 400);
     }
-    assert.ok(reportRows[0].some((row) => row.order_id === 1));
-    assert.equal(reportRows[1].find((row) => row.dish_name === 'Маргарита'), undefined);
-    assert.equal(Number(reportRows[1].find((row) => row.dish_name === 'Пепперони')?.total_qty), 1);
-    assert.deepEqual([...new Set(reportRows[2].map((row) => row.order_id))], [2]);
   } finally {
-    db.off('query-response', recordRows);
     await stopTestServer(server);
   }
 });
@@ -145,7 +184,7 @@ test('Дневной отчёт сохраняет дату выборки пр�
   const ranges: number[][] = [];
   const moveClockDuringQuery = ({ sql, bindings }: { sql: string; bindings: number[] }) => {
     if (sql.includes('`orders` as `o`') && sql.includes('`o`.`route_departure_unix`')) {
-      ranges.push(bindings.map((seconds) => seconds * 1000));
+      ranges.push(bindings.slice(0, 2).map((seconds) => seconds * 1000));
       now = midnight;
     }
   };
@@ -275,6 +314,7 @@ serialTest('Отчёты за день используют сохранённо
     await db('orders').where({ id: 3 }).update({
       route_departure_unix: todayDeparture,
       route_acceptance_ends_unix: todayDeparture - 3600,
+      created_at: db.raw('FROM_UNIXTIME(?)', [day.start.getTime() / 1000 + 3600]),
     });
 
     db.on('query-response', recordRows);

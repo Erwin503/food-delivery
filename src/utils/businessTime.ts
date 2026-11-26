@@ -57,12 +57,7 @@ const findDayStart = (formatter: Intl.DateTimeFormat, day: string): Date => {
   return new Date(after);
 };
 
-export const getBusinessDay = (
-  capturedAt = new Date(Date.now()),
-  timeZone = BUSINESS_TIME_ZONE
-): BusinessDay => {
-  const formatter = timeZone === BUSINESS_TIME_ZONE ? businessDateFormatter : makeDateFormatter(timeZone);
-  const day = dateKey(formatter, capturedAt.getTime());
+const buildBusinessDay = (formatter: Intl.DateTimeFormat, day: string, capturedAt: Date): BusinessDay => {
   const nextDate = new Date(Date.parse(`${day}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
 
   return {
@@ -71,4 +66,22 @@ export const getBusinessDay = (
     end: findDayStart(formatter, nextDate),
     capturedAt,
   };
+};
+
+export const getBusinessDay = (
+  capturedAt = new Date(Date.now()),
+  timeZone = BUSINESS_TIME_ZONE
+): BusinessDay => {
+  const formatter = timeZone === BUSINESS_TIME_ZONE ? businessDateFormatter : makeDateFormatter(timeZone);
+  return buildBusinessDay(formatter, dateKey(formatter, capturedAt.getTime()), capturedAt);
+};
+
+export const getBusinessDayForDate = (day: unknown): BusinessDay | undefined => {
+  if (typeof day !== 'string' || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(day)) return;
+  const midnight = Date.parse(`${day}T00:00:00Z`);
+  if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== day) return;
+
+  const formatter = businessDateFormatter;
+  const result = buildBusinessDay(formatter, day, new Date(Date.now()));
+  if (dateKey(formatter, result.start.getTime()) === day) return result;
 };
