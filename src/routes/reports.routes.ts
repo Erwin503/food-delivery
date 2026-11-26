@@ -13,6 +13,14 @@ const router = Router();
 /**
  * @swagger
  * components:
+ *   parameters:
+ *     ReportDate:
+ *       in: query
+ *       name: date
+ *       description: Дата отчёта в BUSINESS_TIME_ZONE (по умолчанию сегодня). Учитываются заказы на рейсы этой даты строго после последнего выезда накануне (либо с полуночи, если рейсов не было) и до закрытия приёма заказов своего рейса. Отменённые заказы и заказы удалённых сотрудников и компаний исключаются.
+ *       schema:
+ *         type: string
+ *         format: date
  *   headers:
  *     ReportDay:
  *       description: Календарный день отчёта в BUSINESS_TIME_ZONE (по умолчанию Europe/Moscow).
@@ -30,13 +38,17 @@ const router = Router();
  * @swagger
  * /reports/orders/today.pdf:
  *   get:
- *     summary: Скачать PDF-отчёт по сегодняшним заказам, сгруппированным по компаниям
+ *     summary: Скачать PDF по заказам за выбранную дату, сгруппированным по рейсам и компаниям
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/ReportDate'
  *     responses:
+ *       400:
+ *         description: Некорректная дата отчёта
  *       200:
- *         description: PDF-файл с таблицей заказов на сегодня
+ *         description: PDF-файл с таблицей заказов за выбранную дату
  *         headers:
  *           X-Report-Day:
  *             $ref: '#/components/headers/ReportDay'
@@ -56,11 +68,15 @@ router.get('/reports/orders/today.pdf', authenticateToken, checkRole(['admin']),
  * @swagger
  * /reports/dishes/today.pdf:
  *   get:
- *     summary: Скачать PDF-сводку заказанных на сегодня блюд
+ *     summary: Скачать PDF-сводку блюд за выбранную дату
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/ReportDate'
  *     responses:
+ *       400:
+ *         description: Некорректная дата отчёта
  *       200:
  *         description: PDF-файл со списком блюд и итоговыми количествами
  *         headers:
@@ -82,11 +98,15 @@ router.get('/reports/dishes/today.pdf', authenticateToken, checkRole(['admin']),
  * @swagger
  * /reports/labels/today.pdf:
  *   get:
- *     summary: Скачать PDF с карточками-наклейками по каждому заказу на сегодня
+ *     summary: Скачать PDF с наклейками для заказов за выбранную дату
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/ReportDate'
  *     responses:
+ *       400:
+ *         description: Некорректная дата отчёта
  *       200:
  *         description: PDF-файл с компактными карточками для печати и нарезки
  *         headers:

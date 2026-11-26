@@ -1,7 +1,8 @@
 import { NextFunction, Response } from 'express';
 import db from '../db/knex';
+import { AppError } from '../errors/AppError';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay } from '../utils/businessTime';
+import { BUSINESS_TIME_ZONE, BusinessDay, getBusinessDay, getBusinessDayForDate } from '../utils/businessTime';
 import { applyReportFont, createPdfBuffer, createZipArchive, sendPdf, sendZip } from '../utils/reportFiles';
 import { requireAuthenticatedUser } from '../utils/userQueries';
 
@@ -108,11 +109,36 @@ const ensurePageSpace = (doc: PDFKit.PDFDocument, minY: number) => {
   }
 };
 
-const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = true): Promise<TodayOrderRow[]> => {
-  const rows: Array<Omit<TodayOrderRow, 'departure_at'> & { departure_at: string | number }> = await db('orders as o')
+const reportOrdersQuery = async ({ start, end }: BusinessDay) => {
+  const yesterday = getBusinessDay(new Date(start.getTime() - 1));
+  const previousRoute = await db('routes')
+    .select(db.raw('UNIX_TIMESTAMP(departure_at) as departure_seconds'))
+    .whereNull('deleted_at')
+    .where('departure_at', '>=', sqlTimestamp(yesterday.start))
+    .where('departure_at', '<', sqlTimestamp(start))
+    .orderBy('departure_at', 'desc')
+    .first();
+  const lowerBound = previousRoute ? new Date(Number(previousRoute.departure_seconds) * 1000) : start;
+
+  const query = db('orders as o')
     .join('companies as c', 'c.id', 'o.company_id')
     .join('users as u', 'u.id', 'o.user_id')
     .join('routes as r', 'r.id', 'o.route_id')
+    .whereNull('o.deleted_at')
+    .whereNull('c.deleted_at')
+    .whereNull('u.deleted_at')
+    .whereNull('r.deleted_at')
+    .where('r.departure_at', '>=', sqlTimestamp(start))
+    .where('r.departure_at', '<', sqlTimestamp(end))
+    .where('o.created_at', previousRoute ? '>' : '>=', sqlTimestamp(lowerBound))
+    .where('o.created_at', '<', db.ref('r.order_acceptance_ends_at'))
+    .whereNot('o.status', 'cancelled');
+  return { query };
+};
+
+const loadReportOrders = async (day: BusinessDay): Promise<TodayOrderRow[]> => {
+  const { query } = await reportOrdersQuery(day);
+  const rows: Array<Omit<TodayOrderRow, 'departure_at'> & { departure_at: string | number }> = await query
     .leftJoin('order_items as oi', 'oi.order_id', 'o.id')
     .leftJoin('dishes as d', 'd.id', 'oi.dish_id')
     .select(
@@ -133,15 +159,6 @@ const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = t
       'oi.discounted_qty',
       'oi.line_total_cents'
     )
-    .whereNull('o.deleted_at')
-    .whereNull('c.deleted_at')
-    .whereNull('u.deleted_at')
-    .whereNull('r.deleted_at')
-    .modify((query) => {
-      if (!includeCancelled) query.whereNot('o.status', 'cancelled');
-    })
-    .where('r.departure_at', '>=', sqlTimestamp(start))
-    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .orderBy('r.departure_at', 'asc')
     .orderBy('c.name', 'asc')
     .orderBy('u.full_name', 'asc')
@@ -151,16 +168,11 @@ const loadTodayOrders = async ({ start, end }: BusinessDay, includeCancelled = t
   return rows.map((row) => ({ ...row, departure_at: new Date(Number(row.departure_at) * 1000) }));
 };
 
-const loadTodayDishSummary = async ({ start, end }: BusinessDay): Promise<TodayDishSummaryRow[]> => {
-  return db('orders as o')
-    .join('routes as r', 'r.id', 'o.route_id')
+const loadReportDishSummary = async (day: BusinessDay): Promise<TodayDishSummaryRow[]> => {
+  const { query } = await reportOrdersQuery(day);
+  return query
     .join('order_items as oi', 'oi.order_id', 'o.id')
     .join('dishes as d', 'd.id', 'oi.dish_id')
-    .whereNull('o.deleted_at')
-    .whereNull('r.deleted_at')
-    .whereNot('o.status', 'cancelled')
-    .where('r.departure_at', '>=', sqlTimestamp(start))
-    .andWhere('r.departure_at', '<', sqlTimestamp(end))
     .groupBy('d.id', 'd.name')
     .select(
       'd.name as dish_name',
@@ -296,13 +308,13 @@ const buildOrdersReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Pr
   const routes = aggregateOrdersByRoute(rows);
 
   return createPdfBuffer((doc) => {
-    doc.fontSize(20).text('Заказы на сегодня', { underline: true });
+    doc.fontSize(20).text(`Заказы за ${day.day}`, { underline: true });
     doc.moveDown(0.3);
     doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (routes.length === 0) {
-      doc.fontSize(14).text('На сегодня заказов нет.');
+      doc.fontSize(14).text('За выбранную дату заказов нет.');
       return;
     }
 
@@ -414,13 +426,13 @@ const buildOrdersReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Pr
 
 const buildDishesReportPdf = async (day: BusinessDay, rows: TodayDishSummaryRow[]): Promise<Buffer> => {
   return createPdfBuffer((doc) => {
-    doc.fontSize(20).text('Список блюд на сегодня', { underline: true });
+    doc.fontSize(20).text(`Список блюд за ${day.day}`, { underline: true });
     doc.moveDown(0.3);
     doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.8);
 
     if (rows.length === 0) {
-      doc.fontSize(14).text('На сегодня заказанных блюд нет.');
+      doc.fontSize(14).text('За выбранную дату заказанных блюд нет.');
       return;
     }
 
@@ -549,7 +561,7 @@ const buildLabelsReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Pr
   const orders = buildStickerOrders(rows);
 
   return createPdfBuffer((doc) => {
-    doc.fontSize(20).text('Наклейки на заказы', { underline: true });
+    doc.fontSize(20).text(`Наклейки на заказы за ${day.day}`, { underline: true });
     doc.moveDown(0.3);
     doc.fontSize(12).text(`Сформировано: ${formatDateTime(day.capturedAt)}`);
     doc.moveDown(0.2);
@@ -560,7 +572,7 @@ const buildLabelsReportPdf = async (day: BusinessDay, rows: TodayOrderRow[]): Pr
     doc.moveDown(0.8);
 
     if (orders.length === 0) {
-      doc.fontSize(14).fillColor('#111111').text('На сегодня нет заказов для печати наклеек.');
+      doc.fontSize(14).fillColor('#111111').text('За выбранную дату нет заказов для печати наклеек.');
       return;
     }
 
@@ -624,11 +636,13 @@ const buildDemoReportRows = (day: BusinessDay) => {
   return { orders, summary };
 };
 
-const downloadTodayReport = (fileName: string, buildPdf: (day: BusinessDay) => Promise<Buffer>) =>
+const downloadReport = (kind: string, buildPdf: (day: BusinessDay) => Promise<Buffer>) =>
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       await requireAuthenticatedUser(req.user);
-      const day = getBusinessDay();
+      const date = req.query.date;
+      const day = date === undefined ? getBusinessDay() : getBusinessDayForDate(date);
+      if (!day) throw new AppError('date must be a valid date in YYYY-MM-DD format', 400);
       const pdf = await buildPdf(day);
       const validForMs = Math.max(0, day.end.getTime() - Date.now());
       res.set({
@@ -637,20 +651,20 @@ const downloadTodayReport = (fileName: string, buildPdf: (day: BusinessDay) => P
         'X-Report-Valid-For-Ms': String(validForMs),
       });
       res.append('Access-Control-Expose-Headers', 'X-Report-Day, X-Report-Valid-For-Ms');
-      sendPdf(res, fileName, pdf);
+      sendPdf(res, `${kind}-${date === undefined ? 'today' : day.day}.pdf`, pdf);
     } catch (error) {
       next(error);
     }
   };
 
-export const downloadTodayOrdersReport = downloadTodayReport(
-  'orders-today.pdf', async (day) => buildOrdersReportPdf(day, await loadTodayOrders(day))
+export const downloadTodayOrdersReport = downloadReport(
+  'orders', async (day) => buildOrdersReportPdf(day, await loadReportOrders(day))
 );
-export const downloadTodayDishesReport = downloadTodayReport(
-  'dishes-today.pdf', async (day) => buildDishesReportPdf(day, await loadTodayDishSummary(day))
+export const downloadTodayDishesReport = downloadReport(
+  'dishes', async (day) => buildDishesReportPdf(day, await loadReportDishSummary(day))
 );
-export const downloadTodayLabelsReport = downloadTodayReport(
-  'labels-today.pdf', async (day) => buildLabelsReportPdf(day, await loadTodayOrders(day, false))
+export const downloadTodayLabelsReport = downloadReport(
+  'labels', async (day) => buildLabelsReportPdf(day, await loadReportOrders(day))
 );
 
 export const runTodayReportsTestRequest = async (
